@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import {createWorldData} from '../src/world-data.js';
+const a=createWorldData(42), b=createWorldData(42);
+assert.deepEqual(a.islands,b.islands,'same seed produces same navigable map');
+assert.equal(a.terrainHeight(0,0),a.airport.y,'runway is physically flat');
+assert.equal(a.terrainHeight(0,100),a.airport.y,'runway slope is zero');
+assert.equal(a.terrainHeight(250000,250000),0,'open ocean has no collision hill');
+for(const i of a.islands) assert.ok(a.terrainHeight(i.x,i.z)>0,'map islands have real terrain');
+assert.equal(Object.keys(a.routes).length,6);
+for(const r of Object.values(a.routes)) assert.ok(r.every(w=>Number.isFinite(w.x)&&Number.isFinite(w.z)));
+console.log('World: deterministic terrain, runway and six navigable routes pass.');
