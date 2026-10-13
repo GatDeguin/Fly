@@ -6,6 +6,30 @@ import { readFileSync, existsSync } from 'node:fs';
 import { randomBytes, X509Certificate } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 
+const telemetry = { type: 'telemetry', ias: 270, altitude: 32000, heading: 178, vs: 0, throttle: .65,
+  ap: true, status: 'cruise', stall: false, paused: false, connected: true };
+
+test('host haptic telemetry is bounded and uses authoritative flight status', () => {
+  const result = validateMessage('host', { ...telemetry, haptics: { paused: true, connected: false, stall: true,
+    onGround: true, ias: -1, touchdownRate: 7000, loadFactor: 20, controlPitch: -4, controlRoll: 5, controlYaw: -5,
+    turbulence: 2, storm: -1, verticalAcceleration: -100, untrustedField: 'discard' } });
+  assert.deepEqual(result.haptics, { paused: false, connected: true, stall: false, onGround: true,
+    ias: 270, touchdownRate: 6000, loadFactor: 6, controlPitch: -1, controlRoll: 1, controlYaw: -1,
+    turbulence: 1, storm: 0, verticalAcceleration: -50 });
+});
+
+test('nonfinite optional haptic readings fall back safely and legacy telemetry stays valid', () => {
+  const result = validateMessage('host', { ...telemetry, haptics: { touchdownRate: NaN, loadFactor: Infinity,
+    controlPitch: '1', controlRoll: -Infinity, controlYaw: NaN, turbulence: NaN, storm: 'heavy', verticalAcceleration: Infinity } });
+  assert.deepEqual(result.haptics, { paused: false, connected: true, stall: false, onGround: false,
+    ias: 270, touchdownRate: 0, loadFactor: 1, controlPitch: 0, controlRoll: 0, controlYaw: 0,
+    turbulence: 0, storm: 0, verticalAcceleration: 0 });
+  assert.ok(!('haptics' in validateMessage('host', telemetry)));
+  assert.ok(!('haptics' in validateMessage('host', { ...telemetry, haptics: [] })));
+  assert.equal(validateMessage('host', { ...telemetry, ias: Infinity }), null);
+  assert.equal(validateMessage('host', { ...telemetry, ias: NaN }), null);
+});
+
 test('WebSocket frames round trip masked client text and handle partial reads', () => {
   const payload = Buffer.from(JSON.stringify({ type: 'heartbeat' }));
   const header = Buffer.from([0x81, 0x80 | payload.length, 1, 2, 3, 4]);
@@ -50,6 +74,22 @@ test('HTTPS bridge authenticates, relays controls and releases on heartbeat loss
   });
   assert.equal(certificate.subject.CN, 'SkyJourney Local Flight');
   assert.equal(certificate.issuer.CN, 'SkyJourney Local CA');
+  const get = path => new Promise((resolve, reject) => {
+    const request = https.get({ hostname: '127.0.0.1', port, path,
+      ca: new X509Certificate(readFileSync('.local/SkyJourney-Local-CA.cer')).toString() }, response => {
+      const chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.on('end', () => resolve({ status: response.statusCode, headers: response.headers, body: Buffer.concat(chunks) }));
+    });
+    request.on('error', reject);
+  });
+  const hapticsModule = await get('/haptics.js');
+  assert.equal(hapticsModule.status, 200, 'the phone can load the shared haptics module');
+  assert.equal(hapticsModule.headers['content-type'], 'application/javascript; charset=utf-8');
+  assert.deepEqual(hapticsModule.body, readFileSync('src/haptics.js'));
+  for (const path of ['/src/haptics.js', '/../.local/server.pfx', '/%2e%2e/.local/tls.json', '/haptics.js/../tools/local-server.mjs']) {
+    assert.equal((await get(path)).status, 404, 'arbitrary filesystem path is not served: ' + path);
+  }
   const masked = message => {
     const payload = Buffer.from(JSON.stringify(message));
     const mask = randomBytes(4);
@@ -97,9 +137,12 @@ test('HTTPS bridge authenticates, relays controls and releases on heartbeat loss
   assert.equal(host.messages.find(m => m.type === 'input').throttle, .75);
   assert.equal(host.messages.find(m => m.type === 'paired').pin, pin);
   assert.ok(host.messages.find(m => m.type === 'paired').controllerURL.endsWith('/controller'));
-  host.send({ type: 'telemetry', ias: 270, altitude: 32000, heading: 178, vs: 0, throttle: .65, ap: true, status: 'cruise' });
+  const haptics = { paused: false, connected: true, onGround: false, stall: false, touchdownRate: 650,
+    loadFactor: 1.7, controlPitch: .6, controlRoll: -.4, controlYaw: .7, ias: 270, turbulence: .4, storm: .8, verticalAcceleration: 2.3 };
+  host.send({ ...telemetry, haptics });
   await until(() => phone.messages.some(m => m.type === 'telemetry'));
   assert.equal(phone.messages.find(m => m.type === 'telemetry').ias, 270);
+  assert.deepEqual(phone.messages.find(m => m.type === 'telemetry').haptics, haptics);
   clearInterval(phoneHeartbeat);
   await until(() => host.messages.some(m => m.type === 'disconnected'));
   assert.equal(host.messages.find(m => m.type === 'disconnected').reason, 'controller timeout');

@@ -12,6 +12,7 @@ export const WEATHER={
  'Misty Morning':{clouds:.64,haze:.72,wind:2,rain:0,time:6.3,temp:12},
  'Overcast':{clouds:1,haze:.65,wind:7,rain:0,time:13,temp:14},
  'Light Rain':{clouds:1,haze:.77,wind:9,rain:.5,time:16,temp:13},
+ 'Thunderstorm':{clouds:1,haze:.85,wind:30,rain:1,time:13,temp:10},
  'Starry Night':{clouds:.22,haze:.18,wind:2,rain:0,time:22,temp:10}
 };
 export function createWorld(scene,data){

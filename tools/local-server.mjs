@@ -60,11 +60,22 @@ export function validateMessage(role, message) {
     if (message.type === 'motion') return { type: 'motion', calibrated: !!message.calibrated, available: !!message.available, active: !!message.active };
   } else if (role === 'host') {
     if (message.type === 'telemetry' && ['ias', 'altitude', 'heading', 'vs', 'throttle'].every(k => Number.isFinite(message[k]))) {
-      return { type: 'telemetry', ias: message.ias, altitude: message.altitude, heading: message.heading, vs: message.vs,
+      const telemetry = { type: 'telemetry', ias: message.ias, altitude: message.altitude, heading: message.heading, vs: message.vs,
         ap: !!message.ap, throttle: clamp(message.throttle, 0, 1), status: String(message.status || '').slice(0, 80),
         pitch: Number.isFinite(message.pitch) ? message.pitch : 0, roll: Number.isFinite(message.roll) ? message.roll : 0,
         gear: Number.isFinite(message.gear) ? message.gear : 0, flaps: Number.isFinite(message.flaps) ? message.flaps : 0,
         stall: !!message.stall, paused: !!message.paused, connected: !!message.connected };
+      if (message.haptics && typeof message.haptics === 'object' && !Array.isArray(message.haptics)) {
+        const input = message.haptics;
+        const number = (key, low, high, fallback = 0) => Number.isFinite(input[key]) ? clamp(input[key], low, high) : fallback;
+        telemetry.haptics = { paused: telemetry.paused, connected: telemetry.connected, stall: telemetry.stall,
+          onGround: !!input.onGround, ias: clamp(telemetry.ias, 0, 1000),
+          touchdownRate: number('touchdownRate', 0, 6000), loadFactor: number('loadFactor', 0, 6, 1),
+          controlPitch: number('controlPitch', -1, 1), controlRoll: number('controlRoll', -1, 1), controlYaw: number('controlYaw', -1, 1),
+          turbulence: number('turbulence', 0, 1), storm: number('storm', 0, 1),
+          verticalAcceleration: number('verticalAcceleration', -50, 50) };
+      }
+      return telemetry;
     }
     if (message.type === 'feedback' && ['stall', 'touchdown', 'connected'].includes(message.event)) {
       return { type: 'feedback', event: message.event, pattern: Array.isArray(message.pattern) ? message.pattern.slice(0, 8).map(n => clamp(Number(n) || 0, 0, 500)) : [40] };
@@ -84,6 +95,7 @@ export function createRelayServer({ root = ROOT, pfx, password, pin = String(ran
     ['/index.html', ['index.html', 'text/html; charset=utf-8']],
     ['/controller', ['src/mobile-controller.html', 'text/html; charset=utf-8']],
     ['/controller/', ['src/mobile-controller.html', 'text/html; charset=utf-8']],
+    ['/haptics.js', ['src/haptics.js', 'application/javascript; charset=utf-8']],
     ['/certificate', ['.local/SkyJourney-Local-CA.cer', 'application/x-x509-ca-cert']],
   ]);
   function validRequest(req) {
