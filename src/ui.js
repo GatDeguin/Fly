@@ -52,6 +52,7 @@ const TUTORIAL_ES = [
   ['Una llegada suave','Mantené las alas niveladas. Levantá suavemente la nariz antes de tocar tierra; mantené Espacio para frenar.'],
 ];
 const SPANISH = {
+  'Cockpit ray reflections':'Reflejos con rayos en cabina','Dome light':'Luz de techo','Windshield wipers':'Limpiaparabrisas','Landing checklist':'Lista de aterrizaje','Open landing checklist':'Abrir lista de aterrizaje','Configuration updates from the aircraft. Confirm the visual items yourself.':'La configuración se actualiza con el avión. Confirmá vos los ítems visuales.','Runway in sight':'Pista a la vista','Approach brief reviewed':'Aproximación repasada','Reset visual checks':'Limpiar marcas visuales','Set for landing':'Configurado para aterrizar','Check setting':'Revisar posición','In transit':'En movimiento','Gear up':'Tren arriba','Gear down':'Tren abajo','Indicated airspeed':'Velocidad indicada','Ray effects active':'Efectos de rayos activos','Ray effects unavailable in this view or quality mode':'Efectos de rayos en espera por vista o calidad','Ray effects off':'Efectos de rayos desactivados','On':'Encendido','Off':'Apagado','Speed target':'Velocidad seleccionada','Heading target':'Rumbo seleccionado','Altitude target':'Altitud seleccionada','Vertical speed target':'Velocidad vertical seleccionada','Power levers':'Palancas de potencia','Flap selector':'Selector de flaps',
   'Cockpit instruments':'Instrumentos de cabina','Navigation range':'Alcance del mapa','Systems page':'Página de sistemas','Panel brightness':'Brillo del panel','Overview':'Configuración','Flight data':'Datos de vuelo','Runway guidance':'Guía de pista',
   'In the cockpit, use RNG, SYS and DIM. Hold Shift to step backward.':'En la cabina, usá RNG, SYS y DIM. Mantené Shift para retroceder un paso.',
   'Flight':'Vuelo','World':'Mundo','Weather':'Clima','Camera':'Cámara','External View':'Vista exterior','Settings':'Ajustes','Local Time':'Hora local','Altitude':'Altitud','Ground Speed':'Velocidad sobre suelo','Outside Temp.':'Temp. exterior',
@@ -102,6 +103,7 @@ export function createUI(callbacks = {}) {
     <div class="utility-controls" aria-label="Quick controls"><button data-action="pause" title="Pause (Esc)" aria-label="Pause">${icon('pause')}</button><button data-action="mute" title="Sound" aria-label="Mute sound" aria-pressed="false">${icon('sound')}</button><button data-action="photoPanel" title="Photo mode" aria-label="Open photo controls">${icon('camera')}</button><button data-action="fullscreen" title="Fullscreen" aria-label="Toggle fullscreen">${icon('fullscreen')}</button><button data-action="hud" title="Show or hide interface (H)" aria-label="Show or hide interface">${icon('hud')}</button><button data-action="tutorial" title="Learn to fly" aria-label="Start flight tutorial">${icon('help')}</button></div>
     <div class="control-hint hud-element"><span><kbd>W S</kbd> pitch</span><span><kbd>A D</kbd> bank</span><span><kbd>Shift Ctrl</kbd> power</span><span><kbd>P</kbd> autopilot</span><span><kbd>V</kbd> view</span><button aria-label="Dismiss controls hint" data-action="dismissHint">×</button></div>
     <div class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+    <div id="cockpit-control-hint" class="cockpit-control-hint hud-element" hidden aria-hidden="true"><strong></strong><span></span></div>
     <section id="academy-hud" class="academy-card hud-element" hidden aria-label="Landing guidance">
       <header class="academy-header">${icon('runway')}<div><span class="academy-kicker">Landing academy</span><h2 data-academy-text="activeTitle"></h2></div><button class="academy-exit" data-action="academyExit" aria-label="Exit landing challenge" title="Exit landing challenge">${icon('close')}</button></header>
       <div class="academy-readouts"><div><span>To aim · NM</span><strong data-academy-text="distance">—</strong></div><div><span>IAS · KT</span><strong data-academy-text="ias">—</strong></div><div><span>V/S · FPM</span><strong data-academy-text="descent">—</strong></div><div><span>Line · M</span><strong data-academy-text="line">—</strong></div><div><span>Glide · FT</span><strong data-academy-text="glide">—</strong></div></div>
@@ -163,10 +165,24 @@ export function createUI(callbacks = {}) {
       ${select('Navigation range','cockpitRange',[5,10,20,40,80].map(n=>[String(n),`${n} NM`]),'40')}
       ${select('Systems page','cockpitPage',[['overview','Overview'],['flight','Flight data'],['approach','Runway guidance']],'overview')}
       ${range('Panel brightness','cockpitBrightness',85,20,100,5)}
+      ${check('Cockpit ray reflections','cockpitRays',true)}
+      <p class="panel-note" data-live="cockpitRaysStatus"></p>
+      ${check('Dome light','cockpitDome',false)}${check('Windshield wipers','cockpitWipers',false)}
+      <button class="soft-button" data-action="cockpitChecklist">Open landing checklist</button>
       <p class="panel-note">In the cockpit, use RNG, SYS and DIM. Hold Shift to step backward.</p>
     </details>
     <div class="panel-heading photo-heading"><h2 style="font-size:15px">Keep a little sky</h2></div><p class="panel-sub">Find your frame. Capture a moment.</p><div class="photo-actions"><button class="primary-button" data-action="photo">Take photograph</button><button class="soft-button" data-action="hud">Show / hide interface</button></div>${check('Pause to compose','photoMode')}
     <p class="panel-note">Drag to look or orbit. Scroll to zoom. Your photograph is saved as a PNG.</p>
+  `);
+  addPanel('checklist','Landing checklist','Configuration updates from the aircraft. Confirm the visual items yourself.',`
+    <div class="deck-checklist">
+      <div class="deck-check-row" data-checklist="gear" data-ready="false"><span>Landing gear</span><strong>—</strong></div>
+      <div class="deck-check-row" data-checklist="flaps" data-ready="false"><span>Flaps</span><strong>—</strong></div>
+      <div class="deck-check-row"><span>Indicated airspeed</span><strong data-live="checklistIAS">—</strong></div>
+      <label class="deck-check-manual"><input type="checkbox" data-checklist-manual="runway"><span>Runway in sight</span></label>
+      <label class="deck-check-manual"><input type="checkbox" data-checklist-manual="brief"><span>Approach brief reviewed</span></label>
+      <button class="soft-button" data-action="resetChecklist">Reset visual checks</button>
+    </div>
   `);
   addPanel('settings', 'Make yourself at home', 'Small adjustments for a comfortable journey.', `
     ${select('Graphics','quality',[['auto','Adaptive'],['cinematic','Cinematic'],['balanced','Balanced'],['performance','Performance']],'auto')}${range('Volume','volume',35,0,100)}${check('Mute sound','mute')}${check('Quiet ambient music','ambient')}${range('Control sensitivity','sensitivity',1,.25,2,.05)}${range('Gamepad dead zone','deadzone',.12,.03,.35,.01)}
@@ -242,6 +258,16 @@ export function createUI(callbacks = {}) {
     clearTimeout(toastTimer); $('.toast').textContent = String(message); $('.toast').classList.add('visible');
     toastTimer = setTimeout(() => $('.toast').classList.remove('visible'), 4000);
   }
+  function showCockpitHint(label,value='',x=0,y=0) {
+    const hint=$('#cockpit-control-hint');
+    hint.hidden=!label;
+    if(!label)return;
+    writeText(hint.firstElementChild,tr(label));
+    writeText(hint.lastElementChild,tr(value));
+    hint.style.left=`${Math.max(10,Math.min(x+14,innerWidth-248))}px`;
+    hint.style.top=`${Math.max(10,Math.min(y+16,innerHeight-70))}px`;
+  }
+  function resetCockpitChecklist(){ $$('[data-checklist-manual]').forEach(input=>{input.checked=false;}); }
   function highlightNav() {
     $$('.nav-button').forEach(button => {
       const own = button.dataset.panel;
@@ -256,7 +282,7 @@ export function createUI(callbacks = {}) {
     const previous = activePanel; activePanel = next; highlightNav();
     if (focus) {
       if (next) $(`#panel-${next} .close-button`)?.focus({ preventScroll: true });
-      else if (previous) $(`.nav-button[data-panel="${previous}"]`)?.focus({ preventScroll: true });
+      else if (previous) ($(`.nav-button[data-panel="${previous}"]`)||document.querySelector('#scene canvas'))?.focus({ preventScroll: true });
     }
   }
   function setCamera(name) {
@@ -349,6 +375,13 @@ export function createUI(callbacks = {}) {
     if(meta.cockpitRange!==undefined)updateInput('cockpitRange',meta.cockpitRange);
     if(meta.cockpitPage!==undefined)updateInput('cockpitPage',meta.cockpitPage);
     if(meta.cockpitBrightness!==undefined)updateInput('cockpitBrightness',Math.round(meta.cockpitBrightness*100));
+    for(const key of ['cockpitRays','cockpitDome','cockpitWipers'])if(meta[key]!==undefined)updateInput(key,meta[key]);
+    live('cockpitRaysStatus',meta.cockpitRayTracing?'Ray effects active':meta.cockpitRays?'Ray effects unavailable in this view or quality mode':'Ray effects off');
+    const gearValue=n(state.gear),gearRow=$('[data-checklist="gear"]'),flapRow=$('[data-checklist="flaps"]');
+    gearRow.dataset.ready=String(gearValue>=.98);flapRow.dataset.ready=String(n(state.flaps)>=2);
+    writeText(gearRow.lastElementChild,tr(gearValue>=.98?'Gear down':gearValue>.02?'In transit':'Gear up'));
+    writeText(flapRow.lastElementChild,`${Math.round(n(state.flaps))} · ${tr(n(state.flaps)>=2?'Set for landing':'Check setting')}`);
+    live('checklistIAS',`${Math.round(ias)} kt`);
     ['ambient','haptics','invertMotionY','invertMotionX','invertMotionZ','reducedMotion','cameraShake','photoMode'].forEach(key => { if(meta[key] !== undefined) updateInput(key,meta[key]); });
     if(meta.hapticIntensity !== undefined) updateInput('hapticIntensity',n(meta.hapticIntensity)*100);
     if(meta.volume !== undefined) updateInput('volume',n(meta.volume)*100);
@@ -386,6 +419,7 @@ export function createUI(callbacks = {}) {
       case 'gear':emit('gear',n(lastState.gearTarget ?? lastState.gear)<=.5);break;
       case 'flaps':emit('flaps',(n(lastState.flaps)+1)%4);break;
       case 'photoPanel':togglePanel('camera');break;
+      case 'resetChecklist':resetCockpitChecklist();break;
       case 'tutorial':tutorial(0);break;
       case 'closeTutorial':tutorial(-1);break;
       case 'tutorialBack':tutorial(tutorialStep-1);break;
@@ -450,7 +484,7 @@ export function createUI(callbacks = {}) {
   ['pointerup','pointercancel','lostpointercapture'].forEach(event=>on(brakeButton,event,()=>emit('brake',false)));
   on(window,'blur',()=>emit('brake',false));
   hintTimer=setTimeout(()=>$('.control-hint').classList.add('hint-faded'),14000);
-  return { update, toast, setCamera, toggleHUD, togglePanel, setPaused,
+  return { update, toast, setCamera, toggleHUD, togglePanel, setPaused, showCockpitHint, resetCockpitChecklist,
     get panelOpen(){return activePanel;},
     showUnsupported(message){$('#webgl-unsupported').hidden=false;if(message)$('#webgl-unsupported p').textContent=message;},
     showHint(){clearTimeout(hintTimer);$('.control-hint').classList.remove('hint-faded');hintTimer=setTimeout(()=>$('.control-hint').classList.add('hint-faded'),14000);},

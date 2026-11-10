@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {createCockpitDisplays} from './cockpit-displays.js';
 import {createCockpitMaterials,createCockpitLighting} from './cockpit-finish.js';
+import {createCockpitRayEffects} from './cockpit-rays.js';
 
 // All geometry, paint and instruments are generated locally. Aircraft forward is -Z.
 export function createAircraft() {
@@ -287,6 +288,19 @@ export function createAircraft() {
   const noShadow=object=>(object.castShadow=false,object.receiveShadow=false,object);
   const coolLight=finish.coolBacklight||finish.backlight;
   const daylightInk='#ccd5df', warmInk='#dbbb8f';
+  const tactileParts=[],detents=[],legendTextures=new Map();
+  let hoverAction=null,pressedAction=null,tapAction=null,tapTime=0;
+  const interactionId=value=>typeof value==='string'?value:value?.userData?.action??null;
+  function setCockpitInteraction(hover,pressed){
+    hoverAction=interactionId(hover);
+    const next=interactionId(pressed);
+    if(next&&next!==pressedAction){tapAction=next;tapTime=.084;}
+    pressedAction=next;
+  }
+  function tactile(part,id,travel=.013){
+    tactileParts.push({part,id,z:part.position.z,travel,depth:0,highlight:0});
+    return part;
+  }
 
   function moldedBeam(parent,mat,start,end,width,depth=width){
     const a=new THREE.Vector3(...start), b=new THREE.Vector3(...end);
@@ -357,6 +371,27 @@ export function createAircraft() {
   pane('Pilot windscreen glass',[LL,LM,UM,UL]);
   pane('Copilot windscreen glass',[LM,LR,UR,UM]);
   pane('Pilot quarter glass',[lowerSide,LL,UL,upperSide]);
+  function windshieldWiper(name,left,right,upper,mirrored,armLength){
+    const start=new THREE.Vector3(...left),end=new THREE.Vector3(...right);
+    const across=end.clone().sub(start).normalize();
+    const up=new THREE.Vector3(...upper).sub(start);
+    up.addScaledVector(across,-up.dot(across)).normalize();
+    const normal=new THREE.Vector3().crossVectors(across,up).normalize();
+    const mount=keep(place(deck,name));mount.visible=false;
+    mount.position.copy(start).lerp(end,mirrored?.87:.105).addScaledVector(normal,-.017).addScaledVector(up,-.024);
+    mount.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(across,up,normal));
+    const arm=place(mount,'Hinged wiper arm');
+    const barrel=noShadow(cylinder(mount,finish.metal,0,0,0,.043,.034));barrel.rotation.x=Math.PI/2;
+    noShadow(moldedBeam(arm,finish.metal,[0,0,.008],[armLength*.72,.008,.008],.026,.016));
+    noShadow(moldedBeam(arm,finish.edge,[armLength*.6,.006,.006],[armLength*.87,-.012,.008],.015,.014));
+    noShadow(roundedBox(arm,finish.metal,armLength*.80,-.012,.009,armLength*.58,.025,.021));
+    noShadow(roundedBox(arm,finish.rubber,armLength*.80,-.026,.014,armLength*.64,.013,.024));
+    const park=.055;
+    arm.rotation.z=mirrored?Math.PI-park:park;
+    return {mount,arm,mirrored,park};
+  }
+  const wiperRigs=[windshieldWiper('Pilot windshield wiper',LL,LM,UL,false,.97),windshieldWiper('Copilot windshield wiper',LM,LR,UM,true,.73)];
+  let wiperPhase=0,wiperAngle=0;
   for(const [name,a,b,w] of [['Pilot A-pillar',LL,UL,.205],['Central windscreen mullion',LM,UM,.184],['Copilot A-pillar',LR,UR,.155]]){
     const frame=moldedBeam(deck,finish.wall,a,b,w,.17);frame.name=name;
     const sign=a[0]<0?1:-1;
@@ -388,7 +423,20 @@ export function createAircraft() {
   for(const x of [-.81,.81]){
     cylinder(overhead,finish.coaming,x,-.086,-.48,.109,.065);
     cylinder(overhead,finish.brushed,x,-.122,-.48,.073,.023);
-    cylinder(overhead,finish.backlight,x,-.137,-.48,.042,.012);
+    const lens=noShadow(cylinder(overhead,finish.domeLens||finish.backlight,x,-.137,-.48,.050,.012));
+    lens.name='Overhead dome lens';
+  }
+  const overheadLamps=[];
+  const overheadLegend=canvasTexture(640,120,(ctx,w,h)=>{
+    ctx.fillStyle='#17202c';ctx.fillRect(0,0,w,h);ctx.strokeStyle='#647288';ctx.lineWidth=2;ctx.strokeRect(2,2,w-4,h-4);
+    ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='700 31px sans-serif';ctx.fillStyle='#d2dce4';
+    ['DOME','CHECK','WIPER'].forEach((text,i)=>ctx.fillText(text,(i+.5)*w/3,h*.47));
+  }).texture;
+  texturePlane(overhead,overheadLegend,0,-.106,-.405,1.20,.136).rotation.x=Math.PI/2;
+  for(let i=0;i<3;i++){
+    const x=(i-1)*.400;
+    noShadow(roundedBox(overhead,finish.recess||finish.coaming,x,-.113,-.324,.073,.016,.028));
+    overheadLamps.push(keep(noShadow(roundedBox(overhead,i===2?finish.backlight:coolLight,x,-.124,-.324,.047,.007,.014))));
   }
 
   bowedShell('Bowed instrument fascia',finish.panel,2.61,[[-.82,-13.49],[-.75,-13.34],[-.36,-13.37],[.19,-13.43],[.38,-13.52],[.42,-13.75],[.31,-13.94],[-.68,-13.91],[-.84,-13.72]]);
@@ -415,35 +463,61 @@ export function createAircraft() {
     const source=canvasTexture(pixelsX,pixelsY);
     const glass=register(new THREE.MeshBasicMaterial({map:source.texture,toneMapped:false,color:0xffffff}));
     const object=noShadow(mesh(shared.plane,glass,parent,0,0,z));object.scale.set(w,h,1);object.name=name;
+    if(finish.glass){
+      const cover=noShadow(mesh(shared.plane,finish.glass,parent,0,0,z+.002));
+      cover.scale.set(w,h,1);cover.name=name+' anti-glare glass';cover.renderOrder=2;
+    }
     const result={name,...source,object};
     screens.push(result);screenSources[key]=result;return result;
   }
   const fasciaAt=x=>{const v=x/2.6;return [.38*v*v,-.103*v*v];};
   function controlLabel(parent,text,x,y,z,w,h,color=daylightInk){
-    return texturePlane(parent,textTexture(text,color,29,256,78),x,y,z,w,h);
+    const height=Math.max(32,Math.min(128,Math.round(256*h/w)));
+    const key=text+'|'+color+'|'+height;
+    if(!legendTextures.has(key))legendTextures.set(key,canvasTexture(256,height,(ctx,W,H)=>{
+      ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle=color;
+      ctx.font='600 '+Math.round(H*.64)+'px sans-serif';ctx.fillText(text,W*.5,H*.53,W*.90);
+    }).texture);
+    return texturePlane(parent,legendTextures.get(key),x,y,z,w,h);
   }
   const screw=(parent,x,y,z,r=.013)=>{
-    const head=noShadow(cylinder(parent,finish.brushed,x,y,z,r,.014));head.rotation.x=Math.PI/2;
-    noShadow(box(parent,finish.rubber,x,y,z+.008,r*1.1,.003,.004));
+    noShadow(cylinder(parent,finish.recess||finish.rubber,x,y,z-.004,r*1.24,.010)).rotation.x=Math.PI/2;
+    noShadow(cylinder(parent,finish.brushed,x,y,z+.002,r,.013)).rotation.x=Math.PI/2;
+    const slot=noShadow(box(parent,finish.rubber,x,y,z+.009,r*1.31,.003,.004));slot.rotation.z=(x*7+y*13)%Math.PI;
   };
   function keycap(parent,x,y,z,w,h,material=finish.edge){
     const key=noShadow(roundedBox(parent,material,x,y,z,w,h,.028));
     noShadow(roundedBox(parent,finish.rubber,x,y,z-.013,w+.015,h+.015,.020));
     return key;
   }
+  function liveKey(parent,id,label,mark,x,y,z,w,h){
+    const part=tactile(keep(place(parent,label,x,y,z)),id);
+    noShadow(roundedBox(parent,finish.recess||finish.rubber,x,y,z-.017,w+.018,h+.014,.022));
+    const button=action(noShadow(roundedBox(part,finish.knob||finish.edge,0,0,0,w,h,.032)),id,label);
+    button.name=label+' key';
+    controlLabel(part,mark,0,.001,.0175,w*.86,h*.72);
+    return button;
+  }
+  const detailMatrix=new THREE.Object3D();
   function selector(parent,x,y,z,r,id,label,increment=1){
     const knob=keep(place(parent,label,x,y,z));
     const base=noShadow(cylinder(parent,finish.coaming,x,y,z-.021,r*1.31,.023));base.rotation.x=Math.PI/2;
     const rim=noShadow(cylinder(knob,finish.brushed,0,0,0,r,.069));rim.rotation.x=Math.PI/2;
     const grip=noShadow(cylinder(knob,finish.rubber,0,0,.029,r*.87,.029));grip.rotation.x=Math.PI/2;
-    const cap=noShadow(cylinder(knob,finish.edge,0,0,.048,r*.67,.012));cap.rotation.x=Math.PI/2;
-    noShadow(box(knob,finish.ivory,0,r*.42,.055,.006,r*.52,.005));
-    for(let i=0;i<12;i++){
-      const a=i*Math.PI/6;
-      const groove=noShadow(box(knob,finish.brushed,Math.cos(a)*r*.91,Math.sin(a)*r*.91,.028,.006,.009,.028));
-      groove.rotation.z=a;
+    const cap=noShadow(cylinder(knob,finish.knob||finish.edge,0,0,.048,r*.67,.012));cap.rotation.x=Math.PI/2;
+    const marker=noShadow(box(knob,finish.ivory,0,r*.42,.055,.006,r*.52,.005));
+    const ribs=noShadow(register(new THREE.InstancedMesh(shared.box,finish.brushed,18)));
+    ribs.name=label+' machined grip';
+    for(let i=0;i<18;i++){
+      const a=i*Math.PI/9;
+      detailMatrix.position.set(Math.cos(a)*r*.945,Math.sin(a)*r*.945,.026);
+      detailMatrix.rotation.set(0,0,a);detailMatrix.scale.set(.005,.0055,.026);detailMatrix.updateMatrix();ribs.setMatrixAt(i,detailMatrix.matrix);
     }
-    if(id){action(rim,id,label,increment);action(cap,id,label,increment);}
+    knob.add(ribs);
+    if(id){
+      action(rim,id,label,increment);action(grip,id,label,increment);action(cap,id,label,increment);action(ribs,id,label,increment);action(marker,id,label,increment);
+      tactile(knob,id,.007);detents.push({part:knob,id,increment,value:null,angle:0,target:0});
+    }
     return knob;
   }
   function displayBay(key,name,x,w,pixelsX,pixelsY){
@@ -472,41 +546,46 @@ export function createAircraft() {
   faceRing(mcp,finish.edge,mcpWidth+.057,mcpHeight+.062,.025,.024,.014,.035);
   display(mcp,'ap','Mode control display',mcpWidth,mcpHeight,1140,175,.026);
   roundedBox(mcp,finish.panel,0,-.156,-.008,mcpWidth+.053,.081,.047);
-  const apKnobs=[];
   for(const [i,id,label,inc] of [[0,'speed','Speed',5],[1,'heading','Heading',5],[2,'altitude','Altitude',1000],[3,'vs','Vertical speed',250]]) {
     const x=-mcpWidth*.375+i*mcpWidth*.25;
-    apKnobs.push(selector(mcp,x,-.158,.039,.044,id,label,inc));
+    selector(mcp,x,-.158,.039,.044,id,label,inc);
     screw(mcp,x+.124,-.144,.033,.008);
   }
   selector(mcp,-.673,-.159,.038,.033,'ndRange','Navigation range');
   controlLabel(mcp,'RNG',-.567,-.159,.041,.085,.037,warmInk);
-  action(keycap(mcp,-.012,-.158,.044,.124,.060),'systemPage','Systems page');
-  controlLabel(mcp,'SYS',-.012,-.158,.063,.093,.039,warmInk);
-  const apSwitch=action(keycap(mcp,.606,-.158,.043,.142,.063),'ap','Autopilot');
-  apSwitch.name='Autopilot master';
-  controlLabel(mcp,'A/P',.591,-.159,.063,.083,.039);
+  liveKey(mcp,'systemPage','Systems page','SYS',-.012,-.158,.044,.124,.060);
+  liveKey(mcp,'ap','Autopilot master','A/P',.606,-.158,.043,.142,.063);
   const apLamp=keep(noShadow(box(mcp,finish.backlight,.659,-.152,.064,.022,.010,.005)));
+  const cabinLamps=[];
   for(const side of [-1,1]){
-    const x=side<0?-1.74:1.92;
-    const plate=place(deck,side<0?'Flight director and dimmer':'Autopilot mode bank',x,.461,-13.063+fasciaAt(x)[0]*.65);
+    const x=side<0?-1.74:1.785;
+    const plate=place(deck,side<0?'Flight director and dimmer':'Flight deck service controls',x,.461,-13.063+fasciaAt(x)[0]*.65);
     plate.rotation.set(-.06,-side*.08,0);
     roundedBox(plate,finish.coaming,0,0,-.027,.49,.30,.079);
-    for(let i=0;i<3;i++){
-      keycap(plate,(i-1)*.128,.066,.025,.099,.052);
-      controlLabel(plate,(side<0?['FD','BARO','LOC']:['LNAV','VNAV','APP'])[i],(i-1)*.128,.066,.044,.091,.037);
-    }
     for(const p of [-.201,.201])screw(plate,p,-.118,.024,.010);
     if(side<0){
+      for(let i=0;i<3;i++){
+        keycap(plate,(i-1)*.128,.066,.025,.099,.052);
+        controlLabel(plate,['FD','BARO','LOC'][i],(i-1)*.128,.066,.044,.091,.037);
+      }
       selector(plate,-.093,-.060,.027,.046,'cockpitDim','Cockpit lighting');
       controlLabel(plate,'DIM',.083,-.063,.044,.098,.039,warmInk);
-    }else controlLabel(plate,'FLT CONTROL',0,-.060,.027,.306,.045,warmInk);
+    }else{
+      controlLabel(plate,'DECK SERVICE',0,.093,.023,.308,.042,warmInk);
+      for(const [i,id,label,mark] of [[0,'cockpitDome','Dome light','DOME'],[1,'cockpitChecklist','Flight checklist','CHECK'],[2,'cockpitWipers','Windshield wipers','WIPER']]){
+        const dx=(i-1)*.143;
+        liveKey(plate,id,label,mark,dx,.007,.043,.127,.075);
+        noShadow(roundedBox(plate,finish.recess||finish.rubber,dx,-.065,.032,.048,.020,.013));
+        cabinLamps.push(keep(noShadow(roundedBox(plate,i===2?finish.backlight:coolLight,dx,-.065,.042,.034,.010,.006))));
+      }
+    }
   }
   const gearPanel=place(deck,'Landing gear panel',-2.22,-.076,-12.935);
   gearPanel.rotation.y=.12;
   roundedBox(gearPanel,finish.coaming,0,0,-.032,.18,.362,.071);
   roundedBox(gearPanel,finish.rubber,0,-.016,.010,.079,.244,.022);
   controlLabel(gearPanel,'GEAR',0,.134,.023,.135,.041,warmInk);
-  const gearSelector=keep(place(gearPanel,'Landing gear handle',0,-.036,.028));
+  const gearSelector=tactile(keep(place(gearPanel,'Landing gear handle',0,-.036,.028)),'gear',.009);
   const gearStem=moldedBeam(gearSelector,finish.brushed,[0,-.04,0],[0,.075,.105],.035,.036);
   action(gearStem,'gear','Landing gear');
   action(roundedBox(gearSelector,finish.ivory,0,.076,.112,.112,.051,.071),'gear','Landing gear');
@@ -548,7 +627,7 @@ export function createAircraft() {
     roundedBox(rail,finish.rubber,x,-.016,0,.162,.041,.883);
     for(const side of [-1,1])noShadow(roundedBox(rail,finish.brushed,x+side*.066,.01,0,.014,.015,.777));
     for(let i=0;i<10;i++)noShadow(box(rail,i%3===0?finish.backlight:finish.trim,x+.076,.016,-.34+i*.077,.018,.006,.008));
-    const lever=keep(place(rail,'Thrust lever',x,0,.164));
+    const lever=tactile(keep(place(rail,'Thrust lever',x,0,.164)),'throttle',.008);
     cylinder(lever,finish.coaming,0,.052,0,.065,.10).rotation.z=Math.PI/2;
     moldedBeam(lever,finish.brushed,[0,0,0],[0,.278,-.131],.055,.083);
     roundedBox(lever,finish.rubber,0,.273,-.114,.109,.116,.19);
@@ -558,11 +637,32 @@ export function createAircraft() {
   }
   roundedBox(rail,finish.rubber,.316,.015,-.028,.086,.036,.73);
   for(let i=0;i<5;i++)noShadow(box(rail,finish.backlight,.355,.038,-.31+i*.116,.018,.008,.012));
-  const flapLever=keep(place(rail,'Flaps detent lever',.315,.021,.06));
+  const flapLever=tactile(keep(place(rail,'Flaps detent lever',.315,.021,.06)),'flaps',.009);
   moldedBeam(flapLever,finish.brushed,[0,0,0],[0,.215,-.08],.033,.058);
   action(roundedBox(flapLever,finish.ivory,0,.224,-.088,.109,.057,.122),'flaps','Flaps');
   moving.flapLever=flapLever;
   const leverLegend=controlLabel(rail,'THRUST                FLAPS',0,.027,.443,.57,.070,warmInk);leverLegend.rotation.x=-Math.PI/2;
+  const detentLegend=canvasTexture(96,512,(ctx,w,h)=>{
+    ctx.fillStyle='#23262c';ctx.fillRect(0,0,w,h);
+    ctx.fillStyle='#cdd8dd';ctx.font='700 52px monospace';ctx.textAlign='center';ctx.textBaseline='middle';
+    for(let i=0;i<4;i++)ctx.fillText(String(i),w*.51,h*(.14+i*.24));
+    ctx.fillStyle='#8f805e';ctx.fillRect(5,9,4,h-18);
+  }).texture;
+  texturePlane(rail,detentLegend,.403,.023,-.070,.048,.548).rotation.x=-Math.PI/2;
+
+  function stitches(parent,path,count,zOffset=0,width=.0032){
+    const thread=noShadow(register(new THREE.InstancedMesh(shared.box,finish.stitch||finish.trim,count)));
+    const up=new THREE.Vector3(0,1,0),segment=new THREE.Vector3();
+    thread.name='Stitched seam';
+    for(let i=0;i<count;i++){
+      const a=path.getPointAt((i+.08)/count),b=path.getPointAt((i+.62)/count);
+      detailMatrix.position.copy(a).lerp(b,.5);detailMatrix.position.z+=zOffset;
+      segment.copy(b).sub(a);detailMatrix.scale.set(width,segment.length(),width);
+      detailMatrix.quaternion.setFromUnitVectors(up,segment.normalize());detailMatrix.updateMatrix();
+      thread.setMatrixAt(i,detailMatrix.matrix);
+    }
+    parent.add(thread);return thread;
+  }
 
   // Two articulated, multi-part yokes. Their fixed columns are separate from the moving control heads.
   const yokeBadge=textTexture('✈\nSkyJourney','#c7c1b4',36,256,182);
@@ -578,6 +678,7 @@ export function createAircraft() {
     moldedBeam(column,finish.edge,[0,-.458,.27],[0,.075,.105],.099,.048);
     const yoke=keep(place(column,'Yoke control head',0,.156,.09));moving.yokes.push(yoke);
     mesh(yokeBody,finish.leather,yoke);
+    stitches(yoke,yokeCurve,33,.064,.0027);
     roundedBox(yoke,finish.coaming,0,-.112,.009,.475,.399,.176);
     roundedBox(yoke,finish.brushed,0,-.104,.109,.431,.360,.031);
     roundedBox(yoke,finish.rubber,0,-.104,.134,.396,.325,.026);
@@ -593,7 +694,11 @@ export function createAircraft() {
 
   for(const x of [-1.15,1.30]){
     roundedBox(deck,finish.fabric,x,-.803,-10.54,.97,.27,1.05);
-    roundedBox(deck,finish.leather,x,-.08,-10.09,.97,1.16,.20).rotation.x=-.08;
+    const seat=place(deck,'Stitched leather seat back',x,-.08,-10.09);seat.rotation.x=-.08;
+    roundedBox(seat,finish.leather,0,0,0,.97,1.16,.20);
+    roundedBox(seat,finish.leatherSeam||finish.leather,0,0,-.088,.744,.910,.038);
+    const seam=new THREE.CatmullRomCurve3([[-.376,-.47],[-.417,-.37],[-.417,.34],[-.353,.465],[.353,.465],[.417,.34],[.417,-.37],[.376,-.47]].map(([x,y])=>new THREE.Vector3(x,y,-.105)),true);
+    stitches(seat,seam,51,0,.004);
     roundedBox(deck,finish.fabric,x,.69,-10.07,.60,.31,.27);
     for(const side of [-1,1])roundedBox(deck,finish.edge,x+side*.55,-.40,-10.69,.134,.13,.87);
   }
@@ -604,7 +709,7 @@ export function createAircraft() {
     ledge.rotation.y=side*.09;
     moldedBeam(deck,finish.trim,[side*1.895,-.427,-12.95],[side*1.853,-.449,-11.57],.023,.031);
   }
-  const soil=material('#3e3024',.94,0),coffeeMaterial=material('#372317',.36,.01);
+  const soil=material('#3e3024',.94,0);
   const plant=place(deck,'Potted window plant',-2.36,-.450,-12.89);
   const potProfile=[[0,0],[.094,0],[.112,.014],[.128,.145],[.145,.192],[.149,.21],[.142,.219],[.130,.215],[.121,.192],[.109,.043],[0,.036]];
   mesh(register(new THREE.LatheGeometry(potProfile.map(p=>new THREE.Vector2(...p)),28)),finish.ivory,plant);
@@ -643,19 +748,52 @@ export function createAircraft() {
   roundedBox(notebook,finish.leather,0,.024,0,.552,.019,.693);
   texturePlane(notebook,bookArt,0,.037,0,.527,.664).rotation.x=-Math.PI/2;
 
-  const notepad=place(deck,'Right flight notes',2.055,-.418,-11.92);notepad.rotation.y=-.14;
+  const notepad=place(deck,'Approach checklist clipboard',2.055,-.418,-11.92);notepad.rotation.y=-.14;
   roundedBox(notepad,finish.leather,0,-.013,0,.60,.025,.70);
   roundedBox(notepad,paper,0,.004,0,.572,.026,.674);
-  for(let i=0;i<12;i++)noShadow(box(notepad,finish.trim,0,.019,-.273+i*.041,.47,.0015,.002));
-  const pen=place(notepad,'Metal-tip pen',.065,.031,.136);pen.rotation.set(0,.36,Math.PI/2);
+  const checkArt=canvasTexture(530,640,(ctx,w,h)=>{
+    ctx.fillStyle='#eee5ce';ctx.fillRect(0,0,w,h);ctx.fillStyle='#253348';ctx.fillRect(22,20,w-44,100);
+    ctx.fillStyle='#f5ecd9';ctx.font='700 46px sans-serif';ctx.fillText('APPROACH',43,72);
+    ctx.font='600 21px sans-serif';ctx.fillText('SKYJOURNEY / FLIGHT DECK',44,103);
+    ctx.strokeStyle='#9b927d';ctx.lineWidth=2;
+    const items=['Brief the approach','Confirm the runway','Set landing gear','Set landing flaps','Stabilize speed'];
+    for(let i=0;i<items.length;i++){
+      const y=172+i*68;
+      ctx.strokeRect(43,y-28,28,28);ctx.beginPath();ctx.moveTo(42,y+21);ctx.lineTo(w-42,y+21);ctx.stroke();
+      ctx.fillStyle='#253348';ctx.font='600 32px sans-serif';ctx.fillText(items[i],90,y);
+    }
+    ctx.fillStyle='#6f695c';ctx.font='600 19px sans-serif';ctx.fillText('Use the CHECK key for live indications.',43,h-38);
+  }).texture;
+  texturePlane(notepad,checkArt,0,.020,0,.550,.655).rotation.x=-Math.PI/2;
+  roundedBox(notepad,finish.brushed,0,.033,-.305,.206,.027,.038);
+  const pen=place(notepad,'Metal-tip pen',.265,.036,.064);pen.rotation.set(Math.PI/2,.025,0);
   cylinder(pen,finish.coaming,0,0,0,.012,.43);cylinder(pen,finish.brushed,0,.225,0,.009,.048);
   box(pen,finish.brushed,0,-.152,.013,.012,.094,.007);
   const mug=place(deck,'Ceramic mug',2.305,-.450,-12.57);
   const mugProfile=[[0,0],[.10,0],[.122,.016],[.137,.104],[.149,.221],[.149,.260],[.145,.274],[.135,.276],[.126,.269],[.127,.242],[.117,.079],[.090,.034],[0,.028]];
   mesh(register(new THREE.LatheGeometry(mugProfile.map(p=>new THREE.Vector2(...p)),34)),finish.ivory,mug);
-  cylinder(mug,coffeeMaterial,0,.228,0,.127,.010);
+  const coffeeArt=canvasTexture(160,160,(ctx,w,h)=>{
+    const g=ctx.createRadialGradient(w*.39,h*.35,2,w*.5,h*.5,w*.52);
+    g.addColorStop(0,'#65412b');g.addColorStop(.62,'#45271a');g.addColorStop(.91,'#29150e');g.addColorStop(1,'#8a5733');
+    ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
+    for(let i=0;i<51;i++){
+      const a=i*2.39996,r=w*(.32+(i%9)*.018);
+      ctx.fillStyle=i%2?'#925e36':'#6d4027';ctx.globalAlpha=.30+(i%4)*.11;
+      ctx.beginPath();ctx.arc(w*.5+Math.cos(a)*r,h*.5+Math.sin(a)*r,.5+(i%4)*.28,0,Math.PI*2);ctx.fill();
+    }
+    ctx.globalAlpha=1;
+  }).texture;
+  const coffeeMaterial=finish.coffee?register(finish.coffee.clone()):material('#ffffff',.33,.01);
+  coffeeMaterial.color.set(0xffffff);coffeeMaterial.map=coffeeArt;
+  const drink=noShadow(mesh(register(new THREE.CircleGeometry(.126,36)),coffeeMaterial,mug,0,.232,0));drink.rotation.x=-Math.PI/2;
   mesh(register(new THREE.TorusGeometry(.071,.018,10,22)),finish.ivory,mug,.167,.148,-.008).rotation.y=-.12;
-  texturePlane(mug,textTexture('Good flights\nBrighter tomorrows','#514a47',28,512,164),0,.128,.151,.235,.132);
+  const cupArt=canvasTexture(384,256,(ctx,w,h)=>{
+    ctx.fillStyle='#3d485f';ctx.textAlign='center';ctx.font='700 42px sans-serif';ctx.fillText('✈',w*.5,64);
+    ctx.font='600 30px Georgia';ctx.fillText('Good flights',w*.5,119);
+    ctx.font='italic 25px Georgia';ctx.fillText('Brighter tomorrows',w*.5,159);
+    ctx.fillRect(w*.37,184,w*.26,2);
+  }).texture;
+  noShadow(mesh(register(new THREE.CylinderGeometry(.149,.135,.155,26,1,true,-.86,1.72)),inkMaterial(cupArt),mug,0,.129,0));
 
   // Batch shared static pieces without changing raycast targets or articulated controls.
   const primitiveGeometries=new Set(Object.values(shared));
@@ -680,6 +818,7 @@ export function createAircraft() {
     deck.add(instances);
   }
 
+  const rayEffects=createCockpitRayEffects(cabin,finish,screenSources);
   const clamp=THREE.MathUtils.clamp;
   const num=(value,fallback=0)=>Number.isFinite(value)?value:fallback;
   let instrumentTime=-1000,lastFanTime=0,instrumentsReady=false;
@@ -688,6 +827,54 @@ export function createAircraft() {
     cockpitTarget:new THREE.Vector3(.8,-1.8,-21),
     chase:new THREE.Vector3(-33,14,49),wing:new THREE.Vector3(-24,3,5),nose:new THREE.Vector3(0,4,-37),
   };
+  function animateDeck(state,controls,autopilot,world,dt,flapSetting){
+    const reduced=Boolean(world.reducedMotion),snap=reduced||!instrumentsReady;
+    const response=rate=>snap?1:1-Math.exp(-dt*rate);
+    const flightResponse=response(17),tactileResponse=response(38),turnResponse=response(21);
+    for(const yoke of moving.yokes){
+      yoke.rotation.z=THREE.MathUtils.lerp(yoke.rotation.z,-num(controls.roll)*.62,flightResponse);
+      yoke.position.z=THREE.MathUtils.lerp(yoke.position.z,.09+num(controls.pitch)*.075,flightResponse);
+    }
+    for(const lever of moving.throttles)lever.rotation.x=THREE.MathUtils.lerp(lever.rotation.x,-(num(state.throttle,.68)-.5)*.84,flightResponse);
+    moving.flapLever.rotation.x=THREE.MathUtils.lerp(moving.flapLever.rotation.x,flapSetting*.5,flightResponse);
+    gearSelector.rotation.x=THREE.MathUtils.lerp(gearSelector.rotation.x,(num(state.gear,state.gear?1:0)-.5)*.62,flightResponse);
+    apLamp.visible=Boolean(autopilot.enabled);
+
+    const values={speed:num(autopilot.speed,280),heading:num(autopilot.heading),altitude:num(autopilot.altitude,32000),vs:num(autopilot.vs),
+      ndRange:Math.log2(Math.max(1,num(world.rangeNm,40))),cockpitDim:num(world.brightness,.85)*8};
+    for(const dial of detents){
+      const value=values[dial.id];
+      if(dial.value!==null&&value!==dial.value){
+        let change=value-dial.value;
+        if(dial.id==='heading')change=((change%360+540)%360)-180;
+        dial.target+=clamp(change/dial.increment,-5,5)*Math.PI/6;
+      }
+      dial.value=value;
+      dial.angle=THREE.MathUtils.lerp(dial.angle,dial.target,turnResponse);
+      dial.part.rotation.z=dial.angle;
+    }
+    for(const item of tactileParts){
+      const down=pressedAction===item.id||(!reduced&&tapTime>0&&tapAction===item.id);
+      item.depth=THREE.MathUtils.lerp(item.depth,down?1:0,tactileResponse);
+      item.highlight=THREE.MathUtils.lerp(item.highlight,hoverAction===item.id&&!down?1:0,tactileResponse);
+      item.part.position.z=item.z-item.depth*item.travel+item.highlight*.003;
+      item.part.scale.setScalar(1+item.highlight*.026-item.depth*.015);
+    }
+    tapTime=Math.max(0,tapTime-dt);
+
+    const wet=num(world.rain)>.10,armed=Boolean(world.wipers),sweeping=wet&&armed&&!reduced;
+    wiperPhase=sweeping?(wiperPhase+dt*(.72+clamp(num(world.rain),0,1)*.55))%1:0;
+    const sweepTarget=sweeping?.5-.5*Math.cos(wiperPhase*Math.PI*2):0;
+    wiperAngle=THREE.MathUtils.lerp(wiperAngle,sweepTarget,response(24));
+    for(const rig of wiperRigs){
+      rig.mount.visible=wet;
+      const angle=rig.park+wiperAngle*1.03;
+      rig.arm.rotation.z=rig.mirrored?Math.PI-angle:angle;
+    }
+    const dome=world.domeLight===true||num(world.domeLight)>.08;
+    const annunciated=[dome,Boolean(world.checklistOpen),armed];
+    for(let i=0;i<3;i++)cabinLamps[i].visible=overheadLamps[i].visible=annunciated[i];
+  }
   function update(state,controls={},autopilot={},world={}) {
     const now=performance.now();const delta=clamp((now-lastFanTime)/1000,0,.05);lastFanTime=now;
     for(const fan of moving.fans)fan.rotation.z+=delta*(8+num(state.throttle,.7)*38);
@@ -697,14 +884,10 @@ export function createAircraft() {
     for(const elevator of moving.elevators)elevator.rotation.x=-num(controls.pitch)*.2;
     moving.rudder.rotation.y=-num(controls.yaw)*.3;
     for(const gear of moving.gears){const deployed=typeof state.gear==='number'?state.gear:state.gear?1:0;gear.visible=deployed>.025;gear.scale.y=Math.max(.02,deployed);}
-    for(const yoke of moving.yokes){yoke.rotation.z=-num(controls.roll)*.62;yoke.position.z=.09+num(controls.pitch)*.075;}
-    for(const lever of moving.throttles)lever.rotation.x=-(num(state.throttle,.68)-.5)*.84;
-    moving.flapLever.rotation.x=flapSetting*.5;
-    gearSelector.rotation.x=(num(state.gear,state.gear?1:0)-.5)*.62;
-    apLamp.visible=Boolean(autopilot.enabled);
-    for(let i=0;i<apKnobs.length;i++)apKnobs[i].rotation.z=((i===0?num(autopilot.speed,280):i===1?num(autopilot.heading):i===2?num(autopilot.altitude,32000)/100:num(autopilot.vs)/100)%10)*Math.PI/5;
     beaconMaterial.emissiveIntensity=.5+Math.max(0,Math.sin(now*.003))*1.3;
-    if(cabin.visible||!instrumentsReady)cabinLighting.update(world);
+    if(cabin.visible||!instrumentsReady)animateDeck(state,controls,autopilot,world,clamp(num(world.dt,delta),0,.08),flapSetting);
+    else {hoverAction=pressedAction=tapAction=null;tapTime=0;}
+    if(cabin.visible){cabinLighting.update(world);rayEffects.update({...world,wiperPhase});}
     if(!instrumentsReady||(cabin.visible&&now-instrumentTime>=83)){
       instrumentTime=now;
       painter.paint(screenSources,state,autopilot,world);
@@ -713,5 +896,6 @@ export function createAircraft() {
   }
   update({position:{x:0,y:9753,z:0},heading:0,pitch:0,roll:0,ias:280,altitude:32000,verticalSpeed:0,throttle:.68,gear:false,flaps:0,fuel:82,temperature:12},{},{enabled:true,speed:280,heading:0,altitude:32000,vs:0},{});
   const dispose=()=>{for(const resource of resources)resource.dispose();group.clear();interactables.length=0;};
-  return {group,exterior,cabin,cameraPositions,update,interactables,dispose,dimensions:{length:39,wingspan:37,height:11.2},screens};
+  return {group,exterior,cabin,cameraPositions,update,interactables,dispose,setCockpitInteraction,
+    get cockpitRayTracing(){return cabin.visible&&rayEffects.active;},dimensions:{length:39,wingspan:37,height:11.2},screens};
 }

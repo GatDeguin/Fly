@@ -50,6 +50,9 @@
   :is(.academy-open,.cockpit-view) .main-nav .nav-button span{display:none}
 }
 @media(pointer:coarse) and (orientation:landscape) and (max-height:365px){:is(.academy-open,.cockpit-view) .main-nav{width:139px;grid-template-columns:repeat(3,minmax(0,1fr))}}
+.cockpit-control-hint{position:fixed;z-index:7;display:grid;gap:3px;max-width:min(230px,calc(100vw - 24px));padding:8px 11px;border-radius:9px;border:1px solid #d3dcf042;background:#162233ee;box-shadow:0 5px 16px #10162665;color:#f3f2ee;font-size:11px;text-shadow:none;pointer-events:none}.cockpit-control-hint span{color:#b7d9ec;font-variant-numeric:tabular-nums}.cockpit-control-hint span:empty{display:none}
+.deck-checklist{display:grid;gap:8px}.deck-check-row,.deck-check-manual{display:flex;justify-content:space-between;align-items:center;gap:9px;min-height:39px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:#afc3e50b;font-size:12px}.deck-check-row strong{color:#f0c589;font-size:11px;text-align:right;font-variant-numeric:tabular-nums}.deck-check-row[data-ready=true] strong{color:#a6dfc8}.deck-check-row [data-live]{color:#cbe1ed}.deck-check-manual{justify-content:flex-start;cursor:pointer}.deck-check-manual input{accent-color:#a9c2f1;width:17px;height:17px}.deck-checklist .soft-button{margin-top:4px}
+#scene canvas[data-cockpit-hover]{cursor:pointer}#scene canvas[data-cockpit-pressed]{cursor:grabbing}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 </style>
 </head>

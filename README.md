@@ -34,6 +34,10 @@ Las vistas Piloto y Copiloto comparten una cabina 3D con materiales texturados y
 
 Usá **RNG** para cambiar el alcance del mapa, **SYS** para pasar entre configuración, datos de vuelo y guía de pista, y **DIM** para ajustar el brillo. Shift y clic retrocede un paso. También podés ajustar estos tres controles en **Cámara → Instrumentos de cabina**; se guardan en este navegador. La guía de pista es una referencia visual para volar manualmente, incluida la Academia.
 
+Los mandos muestran su nombre y valor al pasar el puntero, se hunden o responden al pulsarlos y emiten un clic con el sonido activado. **DOME**, **WIPER** y **CHECK** controlan la luz de techo, los limpiaparabrisas y la lista de aterrizaje. En lluvia, las escobillas despejan parte del vidrio. La lista lee tren, flaps y velocidad del avión; la confirmación de pista y el repaso quedan a cargo del piloto. Estas funciones también están en **Instrumentos de cabina**.
+
+El trazado de rayos local aproxima reflejos de las pantallas y luces, y sombras de contacto dentro de la cabina. Se activa desde **Reflejos con rayos en cabina**. No se aplica al mundo entero: se suspende en la vista exterior, en Rendimiento o cuando el modo Adaptativo reduce la carga. La opción de movimiento reducido limita las animaciones decorativas.
+
 ## Volar directamente en el móvil
 
 Usá una copia publicada por HTTPS o la página del servidor local. En Settings pulsá **Phone tilt controls**, concedé el permiso de movimiento y calibrá sosteniendo el teléfono en tu posición cómoda. La inclinación lee los sensores de acelerómetro y giroscopio mediante Device Orientation, se adapta a la orientación de pantalla y aplica suavizado y zona neutra. En Settings podés invertir cada eje del acelerómetro: **Y** para cabeceo (subir/bajar el morro), **X** para alabeo y **Z** para timón. El eje Z usa la rotación de orientación que entregue el teléfono; si no hay datos de ese sensor, el timón queda neutro. La preferencia se guarda y también se incluye en el vuelo exportado. Si el dispositivo no entrega sensores, el joystick sigue disponible.
@@ -64,7 +68,7 @@ La orientación, vibración y gamepad físico necesitan comprobación con los di
 
 Desarrollo con Node.js 22 o posterior: `npm ci`, `npm run build` y `npm test`. La carpeta `artifacts` contiene capturas de verificación. No se necesita para jugar.
 
-Para las pruebas de navegador, instalá Chromium con `npx playwright install chromium`. Ejecutá `node tests/cockpit-browser.mjs`, `node tests/academy-browser.mjs`, `node tests/qr-dialog-browser.mjs`, `node tests/mobile-qr-browser.cjs` y `node tests/motion-browser.mjs`. Para el recorrido completo, dejá `node tools/preview.mjs` activo en otra terminal y ejecutá `node tests/browser-smoke.mjs`. Opcionalmente, la variable `SKYJOURNEY_BROWSER_CHANNEL=chrome` permite usar Google Chrome ya instalado. [Guía de instalación de Playwright](https://playwright.dev/docs/library).
+Para las pruebas de navegador, instalá Chromium con `npx playwright install chromium`. Ejecutá `node tests/cockpit-detail-browser.mjs`, `node tests/cockpit-browser.mjs`, `node tests/academy-browser.mjs`, `node tests/qr-dialog-browser.mjs`, `node tests/mobile-qr-browser.cjs` y `node tests/motion-browser.mjs`. Para el recorrido completo, dejá `node tools/preview.mjs` activo en otra terminal y ejecutá `node tests/browser-smoke.mjs`. Opcionalmente, la variable `SKYJOURNEY_BROWSER_CHANNEL=chrome` permite usar Google Chrome ya instalado. [Guía de instalación de Playwright](https://playwright.dev/docs/library).
 
 Three.js está incluido bajo su licencia MIT. La aplicación no incorpora las imágenes de referencia como fondo ni carga modelos, texturas, música o servicios externos.
 

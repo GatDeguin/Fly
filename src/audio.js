@@ -54,6 +54,14 @@ export function createAudio() {
   }
   return {
     async unlock() { if (!context && !initialize()) return false; if (context.state === 'suspended' && !suspended) await context.resume().catch(() => {}); update(lastState, lastMeta); return context.state === 'running'; },
+    controlClick(detent = false) {
+      if (!context || context.state !== 'running' || muted || suspended || volume === 0) return;
+      const tick=context.createOscillator(),shape=context.createGain(),time=context.currentTime;
+      tick.type='triangle';tick.frequency.setValueAtTime(detent?950:590,time);tick.frequency.exponentialRampToValueAtTime(detent?320:190,time+.026);
+      shape.gain.setValueAtTime(detent?.061:.075,time);shape.gain.exponentialRampToValueAtTime(.001,time+.036);
+      tick.connect(shape);shape.connect(master);tick.onended=()=>{tick.disconnect();shape.disconnect();};
+      tick.start(time);tick.stop(time+.041);
+    },
     update,
     setVolume(value) { volume = Math.max(0, Math.min(1, Number(value) || 0)); update(lastState, lastMeta); },
     setMuted(value) { muted = Boolean(value); update(lastState, lastMeta); },
