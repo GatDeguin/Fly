@@ -52,6 +52,8 @@ const TUTORIAL_ES = [
   ['Una llegada suave','Mantené las alas niveladas. Levantá suavemente la nariz antes de tocar tierra; mantené Espacio para frenar.'],
 ];
 const SPANISH = {
+  'Cockpit instruments':'Instrumentos de cabina','Navigation range':'Alcance del mapa','Systems page':'Página de sistemas','Panel brightness':'Brillo del panel','Overview':'Configuración','Flight data':'Datos de vuelo','Runway guidance':'Guía de pista',
+  'In the cockpit, use RNG, SYS and DIM. Hold Shift to step backward.':'En la cabina, usá RNG, SYS y DIM. Mantené Shift para retroceder un paso.',
   'Flight':'Vuelo','World':'Mundo','Weather':'Clima','Camera':'Cámara','External View':'Vista exterior','Settings':'Ajustes','Local Time':'Hora local','Altitude':'Altitud','Ground Speed':'Velocidad sobre suelo','Outside Temp.':'Temp. exterior',
   'The art of flying':'El arte de volar','A gentle hand. A wide-open sky.':'Manos suaves. Un cielo abierto.','Flight mode':'Modo de vuelo','Zen Flight':'Vuelo zen','Standard Flight':'Vuelo estándar','Simulation Flight':'Vuelo de simulación','Engine power':'Potencia de motores','Gear':'Tren','Flaps':'Flaps','Autopilot':'Piloto automático','Heading · °':'Rumbo · °','Altitude · ft':'Altitud · pies','Airspeed · kts':'Velocidad · nudos','Vertical speed · ft/min':'Velocidad vertical · pies/min','Vertical mode':'Modo vertical','Altitude hold':'Mantener altitud','Vertical speed':'Velocidad vertical','Follow selected route':'Seguir ruta elegida','A fresh beginning':'Un nuevo comienzo','On the runway':'En la pista','Approach':'Aproximación','Return to peaceful cruise':'Volver a un crucero tranquilo',
   'Beautiful places':'Lugares hermosos','Choose a journey, or simply follow your curiosity.':'Elegí un recorrido, o seguí tu curiosidad.','YOUR JOURNEY':'TU RECORRIDO','Scenic journeys':'Recorridos panorámicos','Warm coastlines and sunlit islands.':'Costas cálidas e islas al sol.','A quiet passage through a sea of clouds.':'Un tranquilo viaje por un mar de nubes.','Follow the coast into the golden hour.':'Seguí la costa hacia la hora dorada.','Blue ridges, deep valleys and open skies.':'Sierras azules, valles y cielos abiertos.','Open water and an uninterrupted horizon.':'Mar abierto y un horizonte infinito.','A gentle evening above island lights.':'Un atardecer suave sobre luces isleñas.','Follow route with autopilot':'Seguir ruta con piloto automático',
@@ -157,6 +159,12 @@ export function createUI(callbacks = {}) {
   addPanel('camera', 'A new perspective', 'One continuous world. A dozen ways to see it.', `
     <div class="camera-grid">${CAMERAS.map(camera => `<button class="option-button ${camera === 'External' ? 'selected' : ''}" data-camera="${camera}">${camera}</button>`).join('')}</div>
     <div class="panel-divider"></div>${range('Field of view','fov',55,30,95)}${range('Exposure','exposure',1,.55,1.6,.05)}
+    <details class="settings-detail" id="cockpit-options"><summary>Cockpit instruments</summary>
+      ${select('Navigation range','cockpitRange',[5,10,20,40,80].map(n=>[String(n),`${n} NM`]),'40')}
+      ${select('Systems page','cockpitPage',[['overview','Overview'],['flight','Flight data'],['approach','Runway guidance']],'overview')}
+      ${range('Panel brightness','cockpitBrightness',85,20,100,5)}
+      <p class="panel-note">In the cockpit, use RNG, SYS and DIM. Hold Shift to step backward.</p>
+    </details>
     <div class="panel-heading photo-heading"><h2 style="font-size:15px">Keep a little sky</h2></div><p class="panel-sub">Find your frame. Capture a moment.</p><div class="photo-actions"><button class="primary-button" data-action="photo">Take photograph</button><button class="soft-button" data-action="hud">Show / hide interface</button></div>${check('Pause to compose','photoMode')}
     <p class="panel-note">Drag to look or orbit. Scroll to zoom. Your photograph is saved as a PNG.</p>
   `);
@@ -338,6 +346,9 @@ export function createUI(callbacks = {}) {
     if(meta.language && language!==meta.language){language=meta.language;applyLanguage(false);}
     updateAcademy(meta.academy,state,ias);
     updateInput('time',time);['mode','quality','fov','exposure','sensitivity','deadzone','language'].forEach(key => { if(meta[key] !== undefined) updateInput(key,meta[key]); });
+    if(meta.cockpitRange!==undefined)updateInput('cockpitRange',meta.cockpitRange);
+    if(meta.cockpitPage!==undefined)updateInput('cockpitPage',meta.cockpitPage);
+    if(meta.cockpitBrightness!==undefined)updateInput('cockpitBrightness',Math.round(meta.cockpitBrightness*100));
     ['ambient','haptics','invertMotionY','invertMotionX','invertMotionZ','reducedMotion','cameraShake','photoMode'].forEach(key => { if(meta[key] !== undefined) updateInput(key,meta[key]); });
     if(meta.hapticIntensity !== undefined) updateInput('hapticIntensity',n(meta.hapticIntensity)*100);
     if(meta.volume !== undefined) updateInput('volume',n(meta.volume)*100);

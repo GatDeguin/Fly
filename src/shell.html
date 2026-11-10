@@ -44,12 +44,12 @@
 @media(max-width:600px){.academy-card{left:71px;right:13px;top:max(76px,calc(env(safe-area-inset-top) + 60px));transform:none;width:auto;padding:8px 9px}.academy-open .brand-message,.academy-open .sky-stats .stat,.academy-open .sky-mantra{display:none}.academy-readouts span{font-size:8px;letter-spacing:0}.academy-readouts>div{padding-inline:4px}.academy-header h2{font-size:13px}.academy-cue{font-size:10px}.academy-cue small{font-size:9px}.academy-choice{gap:5px}.academy-choice-copy strong{font-size:11px}}
 @media(max-height:450px) and (min-width:601px){.academy-card{top:max(10px,env(safe-area-inset-top));padding-block:7px}.academy-readouts{padding-block:4px;margin-top:5px}.academy-result .button-row button{min-height:33px;padding-block:6px}}
 @media(pointer:coarse) and (orientation:landscape) and (max-height:450px){
-  .academy-open .brand-message,.academy-open .sky-stats .stat,.academy-open .sky-mantra,.academy-open .camera-compass{display:none}
-  .academy-open .main-nav{top:auto;bottom:148px;left:max(8px,env(safe-area-inset-left));width:96px;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px;padding:4px;border-radius:14px}
-  .academy-open .main-nav .nav-button{width:100%;min-width:0;min-height:40px;justify-content:center;gap:0;padding:6px;border-radius:9px}
-  .academy-open .main-nav .nav-button span{display:none}
+  :is(.academy-open,.cockpit-view) :is(.brand-message,.sky-stats .stat,.sky-mantra,.camera-compass){display:none}
+  :is(.academy-open,.cockpit-view) .main-nav{top:auto;bottom:148px;left:max(8px,env(safe-area-inset-left));width:96px;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px;padding:4px;border-radius:14px}
+  :is(.academy-open,.cockpit-view) .main-nav .nav-button{width:100%;min-width:0;min-height:40px;justify-content:center;gap:0;padding:6px;border-radius:9px}
+  :is(.academy-open,.cockpit-view) .main-nav .nav-button span{display:none}
 }
-@media(pointer:coarse) and (orientation:landscape) and (max-height:365px){.academy-open .main-nav{width:139px;grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(pointer:coarse) and (orientation:landscape) and (max-height:365px){:is(.academy-open,.cockpit-view) .main-nav{width:139px;grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 </style>
 </head>

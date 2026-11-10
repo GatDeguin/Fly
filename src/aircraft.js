@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import {createCockpitDisplays} from './cockpit-displays.js';
+import {createCockpitMaterials,createCockpitLighting} from './cockpit-finish.js';
 
 // All geometry, paint and instruments are generated locally. Aircraft forward is -Z.
 export function createAircraft() {
@@ -20,13 +22,10 @@ export function createAircraft() {
   const navy = material('#14253f', .3, .25);
   const darkGlass = material('#23313c', .17, .65);
   const aluminum = material('#a5a3a0', .29, .78);
-  const graphite = material('#353b43', .61, .13);
   const graphiteEdge = material('#53595e', .41, .28);
   const rubber = material('#1a2028', .69, .03);
-  const warmTrim = material('#9f7953', .35, .52);
   const paper = material('#e4d5b8', .9, 0);
   const ivory = material('#f3eee2', .26, .02);
-  const led = material('#ffbc72', .2, .05, { emissive: '#ffac58', emissiveIntensity: 2.2 });
   shared.box = register(new THREE.BoxGeometry(1, 1, 1));
   shared.sphere = register(new THREE.SphereGeometry(1, 16, 10));
   shared.cylinder = register(new THREE.CylinderGeometry(1, 1, 1, 16));
@@ -275,321 +274,415 @@ export function createAircraft() {
   sphere(exterior, beaconMaterial, 0, 2.04, .4, .15, .08, .15);
   for (const side of [-1,1]) sphere(exterior, ivory, side * 2.3, -.35, -3.8, .14,.13,.045);
 
-  // Flight deck. Structural members leave the entire windshield genuinely open.
-  box(cabin, graphite, 0, -1.3, -11.85, 5.5, .16, 5.8);
-  for (const side of [-1,1]) {
-    box(cabin, graphite, side * 2.64, -.28, -12.0, .24, 2.0, 4.8);
-    box(cabin, graphiteEdge, side * 2.47, -.29, -12.7, .48, .16, 2.65);
-    beam(cabin, graphiteEdge, [side * 2.4,.69,-14.1], [side * 2.6,1.9,-12.7], .27, .29);
-    beam(cabin, rubber, [side * 2.2,.7,-14.08], [side * 2.4,1.86,-12.73], .045, .32);
-    beam(cabin, led, [side * 2.37,.1,-13.97], [side * 2.37,-.15,-11.75], .033, .032);
-    box(cabin, graphite, side * 2.52, 1.89, -12.1, .52,.22,3.4);
-  }
-  beam(cabin, graphiteEdge, [.81,.77,-14.33], [1.13,1.80,-13.18], .2,.28);
-  beam(cabin, rubber, [.675,.77,-14.31], [1.0,1.80,-13.18], .037,.28);
-  beam(cabin, warmTrim, [.945,.8,-14.29], [1.265,1.80,-13.18], .021,.285);
-  beam(cabin, graphiteEdge, [-2.4,1.91,-12.75], [1.13,1.91,-13.2], .27,.34);
-  beam(cabin, graphiteEdge, [1.13,1.91,-13.2], [2.6,1.91,-12.7], .27,.34);
-  // Top electronics are positioned above the view and carry real relief.
-  box(cabin, graphite, .17, 2.02, -14.09, 3.22, .27, 2.04);
-  for (let i=0;i<9;i++) {
-    const dial = cylinder(cabin, aluminum, -.97 + i*.27, 1.858, -14.45, .065,.04);
-    if(i%3===0) {const bezel=cylinder(cabin,rubber,-.97+i*.27,1.886,-14.45,.099,.018);bezel.castShadow=false;}
-    dial.name = 'Overhead rotary selector';
-  }
-  // Sculpted dashboard and raised glare shield.
-  box(cabin, graphite, 0, -.08, -13.66, 5.08, 1.39, .28);
-  box(cabin, graphiteEdge, 0, .672, -13.58, 5.14,.11,.54);
-  box(cabin, rubber, 0, .727, -13.6, 5.24,.055,.62);
-  box(cabin, graphite, 0, .511, -13.30, 5.0,.3,.17);
-  box(cabin, aluminum, 0, -.79, -13.41, 5.03,.024,.14);
-  beam(cabin, led, [-2.37,.341,-13.42], [2.38,.341,-13.42], .013,.018);
+  // The flight deck is assembled around a bowed shell; the four display bays have real recesses.
+  const finish=createCockpitMaterials(register);
+  const cabinLighting=createCockpitLighting(cabin,finish);
+  const painter=createCockpitDisplays();
+  const deck=new THREE.Group();deck.name='Flight-deck structure';cabin.add(deck);
+  const live=new Set();
+  const keep=object=>(live.add(object),object);
+  const place=(parent,name,x=0,y=0,z=0)=>{
+    const object=new THREE.Group();object.name=name;object.position.set(x,y,z);parent.add(object);return object;
+  };
+  const noShadow=object=>(object.castShadow=false,object.receiveShadow=false,object);
+  const coolLight=finish.coolBacklight||finish.backlight;
+  const daylightInk='#ccd5df', warmInk='#dbbb8f';
 
-  const screens = [];
-  function screen(name, x, y, z, width, height, pixelsX = 640, pixelsY = 560) {
-    box(cabin, rubber, x,y,z,width+.10,height+.10,.11);
-    box(cabin, graphiteEdge,x,y,z+.058,width+.026,height+.026,.022);
-    const display = canvasTexture(pixelsX,pixelsY);
-    const screenMaterial = register(new THREE.MeshBasicMaterial({map:display.texture,toneMapped:false}));
-    const object = mesh(shared.plane,screenMaterial,cabin,x,y,z+.077);
-    object.scale.set(width,height,1); object.castShadow=false; object.receiveShadow=false;
-    object.name=name;
-    screens.push({name,...display,object});
-    // Physical selectors line the bottom edge, rather than painted fake knobs.
-    for(let i=0;i<6;i++) {
-      const button=box(cabin,graphiteEdge,x-width*.43+i*width*.173,y-height*.5-.048,z+.076,.066,.028,.022);
-      button.castShadow=false;
-    }
-    return display;
+  function moldedBeam(parent,mat,start,end,width,depth=width){
+    const a=new THREE.Vector3(...start), b=new THREE.Vector3(...end);
+    const item=roundedBox(parent,mat,0,0,0,width,a.distanceTo(b),depth);
+    item.position.copy(a).lerp(b,.5);
+    item.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),b.sub(a).normalize());
+    return item;
   }
-  const pfd = screen('Primary flight display', -1.71,-.225,-13.42,1.14,1.0);
-  const nd = screen('Navigation display',-.39,-.225,-13.42,1.34,1.0,768,576);
-  const engines = screen('Engine information',1.00,-.225,-13.42,1.15,1.0);
-  const systems = screen('Aircraft systems',2.1,-.225,-13.42,.84,1.0,512,576);
-  const apReadout = canvasTexture(1024,164);
-  const apPanel=mesh(shared.plane,register(new THREE.MeshBasicMaterial({map:apReadout.texture,toneMapped:false})),cabin,0,.516,-13.201);
-  apPanel.scale.set(2.76,.271,1);apPanel.castShadow=false;apPanel.receiveShadow=false;
-  const apKnobs = [];
-  for(const [i,id,label] of [[0,'speed','Speed'],[1,'heading','Heading'],[2,'altitude','Altitude'],[3,'vs','Vertical speed']]) {
-    const x=-1.13+i*.746;
-    const knob=cylinder(cabin,aluminum,x,.394,-13.09,.048,.08);knob.rotation.x=Math.PI/2;
-    action(knob,id,label);apKnobs.push(knob);
-    const mark=box(cabin,ivory,x,.416,-13.047,.012,.029,.006); mark.castShadow=false;
+  function bowedShell(name,mat,half,profile,wrap=.38,dip=.11){
+    const vertices=[],uv=[],indices=[],n=profile.length,steps=22;
+    for(let i=0;i<=steps;i++){
+      const u=i/steps*2-1,s=u*u;
+      for(let j=0;j<n;j++){const [y,z]=profile[j];vertices.push(u*half,y-dip*s,z+wrap*s);uv.push(i/steps,j/n);}
+    }
+    for(let i=0;i<steps;i++)for(let j=0;j<n;j++){
+      const a=i*n+j,b=a+n,d=i*n+(j+1)%n,c=d+n;indices.push(a,b,d,b,c,d);
+    }
+    for(let j=1;j<n-1;j++)indices.push(0,j,j+1,steps*n,steps*n+j+1,steps*n+j);
+    const geometry=register(new THREE.BufferGeometry());
+    geometry.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));
+    geometry.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));geometry.setIndex(indices);geometry.computeVertexNormals();
+    const object=mesh(geometry,mat,deck);object.name=name;return object;
   }
-  const apButton=box(cabin,graphiteEdge,1.63,.511,-13.168,.25,.165,.055);
-  action(apButton,'ap','Autopilot');
-  texturePlane(cabin,textTexture('AP', '#b4ebd3', 52,256,128),1.63,.519,-13.134,.175,.078);
-  const gearButton=box(cabin,aluminum,-2.31,-.81,-13.24,.077,.17,.085);action(gearButton,'gear','Landing gear');
-  texturePlane(cabin,textTexture('GEAR', '#c1bcae', 34,256,96),-2.31,-.935,-13.18,.24,.063);
-
-  // Dense but economical groups of tactile avionics controls and vents.
-  const littleButtons = new THREE.InstancedMesh(shared.box,graphiteEdge,62);
-  const knobInstances = new THREE.InstancedMesh(shared.cylinder,aluminum,22);
-  let smallIndex=0, knobIndex=0;
-  for(const side of [-1,1]) {
-    for(let i=0;i<12;i++) {
-      dummy.position.set(side*(1.91+(i%3)*.15),.49+Math.floor(i/3)*.046,-13.155);
-      dummy.scale.set(.06,.024,.025);dummy.rotation.set(0,0,0);dummy.updateMatrix();littleButtons.setMatrixAt(smallIndex++,dummy.matrix);
-    }
-    for(let i=0;i<5;i++) {
-      dummy.position.set(side*(1.82+i*.145),.605,-13.145);dummy.scale.set(.033,.04,.033);dummy.rotation.set(Math.PI/2,0,0);dummy.updateMatrix();knobInstances.setMatrixAt(knobIndex++,dummy.matrix);
-    }
-    for(let j=0;j<5;j++) box(cabin,rubber,side*2.42,.21-j*.082,-13.22,.14,.039,.044);
-    for(let j=0;j<7;j++) box(cabin,rubber,side*2.51,-.02,-12.42+j*.1,.12,.015,.056);
+  function line(parent,mat,points,radius=.009,steps=14){
+    const path=new THREE.CatmullRomCurve3(points.map(point=>new THREE.Vector3(...point)));
+    return noShadow(mesh(register(new THREE.TubeGeometry(path,steps,radius,7,false)),mat,parent));
+  }
+  function faceRing(parent,mat,w,h,wall,depth,z,r=.06){
+    const outline=(p,W,H,R)=>{
+      const x=W/2,y=H/2;R=Math.min(R,x*.7,y*.7);
+      p.moveTo(-x+R,-y);p.lineTo(x-R,-y);p.quadraticCurveTo(x,-y,x,-y+R);
+      p.lineTo(x,y-R);p.quadraticCurveTo(x,y,x-R,y);p.lineTo(-x+R,y);
+      p.quadraticCurveTo(-x,y,-x,y-R);p.lineTo(-x,-y+R);p.quadraticCurveTo(-x,-y,-x+R,-y);
+    };
+    const shape=new THREE.Shape(),hole=new THREE.Path();
+    outline(shape,w,h,r);outline(hole,w-2*wall,h-2*wall,Math.max(.014,r-wall*.55));shape.holes.push(hole);
+    const geometry=register(new THREE.ExtrudeGeometry(shape,{depth,bevelEnabled:true,bevelThickness:.007,bevelSize:.007,bevelSegments:2,curveSegments:4}));
+    return mesh(geometry,mat,parent,0,0,z);
+  }
+  function pane(name,points){
+    const geometry=register(new THREE.BufferGeometry());
+    geometry.setAttribute('position',new THREE.Float32BufferAttribute(points.flat(),3));
+    geometry.setAttribute('uv',new THREE.Float32BufferAttribute([0,0,1,0,1,1,0,1],2));
+    geometry.setIndex([0,1,2,0,2,3]);geometry.computeVertexNormals();
+    const glass=noShadow(mesh(geometry,finish.windshield,deck));glass.name=name;glass.renderOrder=2;
   }
 
-  // The control pedestal sits between two independently articulated yokes.
-  const pedestalStart=cabin.children.length;
-  const pedestal=box(cabin,graphite,0,-.81,-12.01,.97,.53,1.77);pedestal.rotation.x=.13;
-  box(cabin,graphiteEdge,0,-.481,-12.28,1.06,.077,1.7).rotation.x=.12;
-  const pedestalPanel=canvasTexture(768,768,ctx=> {
-    ctx.fillStyle='#17222b';ctx.fillRect(0,0,768,768);
-    ctx.strokeStyle='#384c58';ctx.lineWidth=5;
-    for(let y=18;y<750;y+=187) for(let x=18;x<750;x+=250){ctx.strokeRect(x,y,232,165);ctx.fillStyle='#95cee5';ctx.font='17px monospace';ctx.fillText(y<400?'FLT  NAV  PERF':'FUEL   SYSTEM',x+14,y+24);for(let j=0;j<4;j++){ctx.fillStyle=j===2?'#c4bd66':'#638b9c';ctx.fillRect(x+17,y+45+j*25,86,5);ctx.fillRect(x+125,y+45+j*25,74,5);}}
+  roundedBox(deck,finish.fabric,0,-1.23,-11.95,5.3,.19,5.75);
+  for(const side of [-1,1]){
+    const lining=roundedBox(deck,finish.wall,side*2.62,-.24,-12.16,.23,1.66,3.63);
+    lining.rotation.y=side*.055;
+    roundedBox(deck,finish.panel,side*2.50,.51,-12.18,.40,.095,3.3);
+    roundedBox(deck,finish.edge,side*2.58,-.18,-12.47,.27,.13,2.30);
+    moldedBeam(deck,finish.trim,[side*2.64,.58,-13.46],[side*2.55,.48,-10.90],.074,.095);
+    moldedBeam(deck,finish.backlight,[side*2.45,.185,-13.73],[side*2.48,-.055,-11.48],.015,.018);
+    moldedBeam(deck,finish.rubber,[side*2.43,.17,-13.78],[side*2.465,-.08,-11.44],.050,.041);
+    roundedBox(deck,finish.rubber,side*2.58,.13,-12.58,.092,.27,.59);
+    for(let i=0;i<8;i++)box(deck,finish.edge,side*2.526,.03+i*.026,-12.58,.032,.008,.47);
+    const inset=roundedBox(deck,finish.coaming,side*2.29,.55,-12.49,.21,.035,.34);
+    inset.rotation.y=side*.09;
+    for(let i=0;i<3;i++)roundedBox(deck,finish.metal,side*2.29,.57,-12.58+i*.085,.09,.023,.044);
+  }
+
+  const LL=[-2.20,.655,-13.80],UL=[-2.61,2.20,-13.18];
+  const LM=[.77,.698,-14.24],UM=[1.15,2.20,-13.31];
+  const LR=[2.57,.606,-13.48],UR=[2.79,2.15,-12.93];
+  const lowerSide=[-2.65,.54,-11.82],upperSide=[-2.80,2.09,-11.87];
+  pane('Pilot windscreen glass',[LL,LM,UM,UL]);
+  pane('Copilot windscreen glass',[LM,LR,UR,UM]);
+  pane('Pilot quarter glass',[lowerSide,LL,UL,upperSide]);
+  for(const [name,a,b,w] of [['Pilot A-pillar',LL,UL,.205],['Central windscreen mullion',LM,UM,.184],['Copilot A-pillar',LR,UR,.155]]){
+    const frame=moldedBeam(deck,finish.wall,a,b,w,.17);frame.name=name;
+    const sign=a[0]<0?1:-1;
+    moldedBeam(deck,finish.rubber,[a[0]+sign*w*.54,a[1]-.018,a[2]+.011],[b[0]+sign*w*.54,b[1],b[2]+.011],.033,.11);
+    moldedBeam(deck,finish.trim,[a[0]-sign*w*.36,a[1]+.02,a[2]+.082],[b[0]-sign*w*.36,b[1]-.02,b[2]+.082],.012,.029);
+  }
+  moldedBeam(deck,finish.edge,UL,UM,.138,.18);
+  moldedBeam(deck,finish.edge,UM,UR,.130,.18);
+  moldedBeam(deck,finish.rubber,LL,LM,.045,.083);
+  moldedBeam(deck,finish.rubber,LM,LR,.043,.079);
+  moldedBeam(deck,finish.wall,UL,upperSide,.142,.143);
+  moldedBeam(deck,finish.edge,LL,lowerSide,.112,.129);
+  bowedShell('Molded overhead liner',finish.wall,2.64,[[2.20,-12.96],[2.31,-12.98],[2.36,-11.31],[2.27,-10.58],[2.20,-10.61]],.19,.115);
+  const overhead=place(deck,'Inset overhead switch panel',.19,2.195,-13.09);
+  roundedBox(overhead,finish.coaming,0,.035,0,2.16,.13,1.40);
+  roundedBox(overhead,finish.panel,0,-.029,-.04,1.94,.064,1.18);
+  for(let bank=0;bank<3;bank++){
+    const x=(bank-1)*.61;
+    roundedBox(overhead,finish.rubber,x,-.073,-.11,.54,.041,.79);
+    for(let i=0;i<4;i++){
+      roundedBox(overhead,finish.edge,x-.146+i*.098,-.102,-.08,.074,.035,.071);
+      noShadow(box(overhead,i===1?finish.backlight:coolLight,x-.146+i*.098,-.121,-.098,.029,.006,.019));
+    }
+    for(let i=0;i<3;i++){
+      const knob=cylinder(overhead,finish.metal,x-.154+i*.154,-.108,.144,.035,.055);
+      knob.rotation.x=.03;
+    }
+  }
+  for(const x of [-.81,.81]){
+    cylinder(overhead,finish.coaming,x,-.086,-.48,.109,.065);
+    cylinder(overhead,finish.brushed,x,-.122,-.48,.073,.023);
+    cylinder(overhead,finish.backlight,x,-.137,-.48,.042,.012);
+  }
+
+  bowedShell('Bowed instrument fascia',finish.panel,2.61,[[-.82,-13.49],[-.75,-13.34],[-.36,-13.37],[.19,-13.43],[.38,-13.52],[.42,-13.75],[.31,-13.94],[-.68,-13.91],[-.84,-13.72]]);
+  bowedShell('Lower knee bolster',finish.wall,2.57,[[-1.05,-13.63],[-1.00,-13.46],[-.82,-13.39],[-.74,-13.43],[-.73,-13.71],[-.97,-13.82]],.40,.08);
+  bowedShell('Sculpted glare shield',finish.coaming,2.65,[[.55,-13.15],[.59,-13.07],[.645,-13.07],[.73,-13.18],[.768,-13.41],[.753,-13.77],[.716,-14.07],[.655,-14.13],[.58,-13.94]],.29,.125);
+  bowedShell('Mode-control fascia',finish.edge,2.48,[[.27,-13.30],[.305,-13.16],[.55,-13.175],[.61,-13.25],[.63,-13.46],[.36,-13.60]],.33,.115);
+  const curvePoints=(y,z,bow,dip,extent=2.53)=>Array.from({length:13},(_,i)=>{
+    const u=i/6-1;return [u*extent,y-dip*u*u,z+bow*u*u];
   });
-  const pedestalSurface=mesh(shared.plane,inkMaterial(pedestalPanel.texture),cabin,0,-.435,-12.16);
-  pedestalSurface.scale.set(.94,1.58,1);pedestalSurface.rotation.x=-Math.PI/2+.12;
-  for(let i=0;i<38;i++) {
-    dummy.position.set(-.42+(i%5)*.18,-.406,-13.46+Math.floor(i/5)*.15);
-    dummy.scale.set(.052,.028,.033);dummy.rotation.set(0,0,0);dummy.updateMatrix();littleButtons.setMatrixAt(smallIndex++,dummy.matrix);
-  }
-  for(let i=0;i<12;i++) {
-    dummy.position.set(-.47+(i%2)*.94,-.414,-13.48+Math.floor(i/2)*.24);
-    dummy.scale.set(.025,.037,.025);dummy.rotation.set(0,0,0);dummy.updateMatrix();knobInstances.setMatrixAt(knobIndex++,dummy.matrix);
-  }
-  cabin.add(littleButtons,knobInstances);
-  box(cabin,rubber,0,-.415,-11.83,.46,.075,.77);
-  for(const x of [-.115,.115]) {
-    box(cabin,aluminum,x,-.365,-11.79,.036,.018,.79);
-    const lever=new THREE.Group();lever.position.set(x,-.41,-11.56);cabin.add(lever);
-    beam(lever,aluminum,[0,0,0],[0,.37,-.13],.047);
-    const grip=roundedBox(lever,ivory,0,.39,-.16,.15,.094,.23);
-    action(grip,'throttle','Engine power');moving.throttles.push(lever);
-  }
-  const flapLever=new THREE.Group();flapLever.position.set(.383,-.40,-11.75);cabin.add(flapLever);
-  beam(flapLever,aluminum,[0,0,0],[0,.26,-.04],.038);
-  action(box(flapLever,ivory,0,.278,-.04,.085,.067,.12),'flaps','Flaps');
-  moving.flapLever=flapLever;
-  texturePlane(cabin,textTexture('POWER        FLAPS', '#dbc49c', 26,512,64),0,-.41,-11.38,.82,.077).rotation.x=-Math.PI/2;
-  const pedestalAssembly=new THREE.Group();pedestalAssembly.position.z=-.7;
-  cabin.children.slice(pedestalStart).filter(object=>object!==littleButtons&&object!==knobInstances).forEach(object=>pedestalAssembly.add(object));
-  cabin.add(pedestalAssembly);
-  const yokeBadge=textTexture('✈\nSkyJourney', '#c6baa4', 31,256,192);
-  for(const x of [-1.16,1.32]) {
-    const column=new THREE.Group();column.position.set(x,-.52,-13.0);cabin.add(column);
-    beam(column,graphiteEdge,[0,-.51,.18],[0,.0,0],.13,.19);
-    const yoke=new THREE.Group();yoke.position.set(0,.22,.09);column.add(yoke);moving.yokes.push(yoke);
-    const curve=new THREE.CatmullRomCurve3([new THREE.Vector3(-.49,.29,0),new THREE.Vector3(-.54,-.19,.02),new THREE.Vector3(-.44,-.33,.015),new THREE.Vector3(0,-.37,0),new THREE.Vector3(.44,-.33,.015),new THREE.Vector3(.54,-.19,.02),new THREE.Vector3(.49,.29,0)]);
-    mesh(register(new THREE.TubeGeometry(curve,32,.055,8,false)),rubber,yoke);
-    roundedBox(yoke,graphiteEdge,0,-.14,.025,.43,.45,.13);
-    roundedBox(yoke,rubber,0,-.14,.108,.385,.394,.028);
-    texturePlane(yoke,yokeBadge,0,-.145,.127,.325,.257);
-    for(const side of [-1,1]) {
-      const grip=mesh(shared.capsule,rubber,yoke,side*.491,.19,.016);grip.scale.set(.075,.088,.071);grip.rotation.z=side*-.17;
-      sphere(yoke,graphiteEdge,side*.49,.352,.01,.095,.085,.076);
-      box(yoke,aluminum,side*.474,.247,.105,.047,.097,.027);
-      const thumb=cylinder(yoke,graphiteEdge,side*.435,.35,.091,.044,.02);thumb.rotation.x=Math.PI/2;
+  line(deck,finish.trim,curvePoints(.706,-13.16,.28,.12),.014,28);
+  line(deck,coolLight,curvePoints(.527,-13.137,.31,.118),.007,28);
+  line(deck,finish.edge,curvePoints(-.765,-13.309,.37,.10),.016,28);
+  for(const side of [-1,1]){
+    const foot=place(deck,'Lower kick panel',side*1.18,-.995,-13.29);
+    roundedBox(foot,finish.coaming,0,0,0,.65,.38,.16).rotation.x=-.20;
+    for(const x of [-.17,.17]){
+      roundedBox(foot,finish.rubber,x,-.018,.086,.225,.23,.065);
+      for(let i=0;i<4;i++)noShadow(box(foot,finish.edge,x,-.082+i*.04,.124,.169,.010,.013));
     }
   }
-  // Cushioned seats are behind the pilot eye, visible when looking around.
-  for(const x of [-1.15,1.3]) {
-    box(cabin,rubber,x,-.79,-10.54,.97,.29,1.05);
-    box(cabin,graphiteEdge,x,-.08,-10.06,.97,1.16,.21).rotation.x=-.08;
-    box(cabin,rubber,x,.68,-10.04,.59,.32,.24);
-    for(const side of [-1,1]) box(cabin,graphiteEdge,x+side*.57,-.39,-10.66,.13,.12,.91);
+
+  const screens=[],screenSources={};
+  function display(parent,key,name,w,h,pixelsX,pixelsY,z=.024){
+    const source=canvasTexture(pixelsX,pixelsY);
+    const glass=register(new THREE.MeshBasicMaterial({map:source.texture,toneMapped:false,color:0xffffff}));
+    const object=noShadow(mesh(shared.plane,glass,parent,0,0,z));object.scale.set(w,h,1);object.name=name;
+    const result={name,...source,object};
+    screens.push(result);screenSources[key]=result;return result;
+  }
+  const fasciaAt=x=>{const v=x/2.6;return [.38*v*v,-.103*v*v];};
+  function controlLabel(parent,text,x,y,z,w,h,color=daylightInk){
+    return texturePlane(parent,textTexture(text,color,29,256,78),x,y,z,w,h);
+  }
+  const screw=(parent,x,y,z,r=.013)=>{
+    const head=noShadow(cylinder(parent,finish.brushed,x,y,z,r,.014));head.rotation.x=Math.PI/2;
+    noShadow(box(parent,finish.rubber,x,y,z+.008,r*1.1,.003,.004));
+  };
+  function keycap(parent,x,y,z,w,h,material=finish.edge){
+    const key=noShadow(roundedBox(parent,material,x,y,z,w,h,.028));
+    noShadow(roundedBox(parent,finish.rubber,x,y,z-.013,w+.015,h+.015,.020));
+    return key;
+  }
+  function selector(parent,x,y,z,r,id,label,increment=1){
+    const knob=keep(place(parent,label,x,y,z));
+    const base=noShadow(cylinder(parent,finish.coaming,x,y,z-.021,r*1.31,.023));base.rotation.x=Math.PI/2;
+    const rim=noShadow(cylinder(knob,finish.brushed,0,0,0,r,.069));rim.rotation.x=Math.PI/2;
+    const grip=noShadow(cylinder(knob,finish.rubber,0,0,.029,r*.87,.029));grip.rotation.x=Math.PI/2;
+    const cap=noShadow(cylinder(knob,finish.edge,0,0,.048,r*.67,.012));cap.rotation.x=Math.PI/2;
+    noShadow(box(knob,finish.ivory,0,r*.42,.055,.006,r*.52,.005));
+    for(let i=0;i<12;i++){
+      const a=i*Math.PI/6;
+      const groove=noShadow(box(knob,finish.brushed,Math.cos(a)*r*.91,Math.sin(a)*r*.91,.028,.006,.009,.028));
+      groove.rotation.z=a;
+    }
+    if(id){action(rim,id,label,increment);action(cap,id,label,increment);}
+    return knob;
+  }
+  function displayBay(key,name,x,w,pixelsX,pixelsY){
+    const [wrap,dip]=fasciaAt(x),h=.84;
+    const bay=place(deck,name+' bay',x,-.129+dip,-13.256+wrap);
+    bay.rotation.set(-.102,-x*.035,0);
+    roundedBox(bay,finish.coaming,0,0,-.066,w+.107,h+.137,.117);
+    faceRing(bay,finish.brushed,w+.085,h+.106,.030,.026,.001,.046);
+    faceRing(bay,finish.rubber,w+.039,h+.059,.021,.039,.020,.034);
+    display(bay,key,name,w,h,pixelsX,pixelsY,.026);
+    for(const side of [-1,1])for(const y of [-.424,.424])screw(bay,side*(w/2+.035),y,.047,.009);
+    for(let i=0;i<5;i++){
+      const x=-w*.36+i*w*.18;keycap(bay,x,-.480,.031,.061,.035);
+      noShadow(box(bay,finish.accent,x,-.474,.047,.022,.003,.004));
+    }
+    return bay;
+  }
+  displayBay('pfd','Primary flight display',-1.49,1.125,720,620);
+  displayBay('nd','Navigation display',-.237,1.25,760,620);
+  displayBay('engines','Engine information',.96,1.053,680,620);
+  displayBay('systems','Aircraft systems',1.99,.91,590,620);
+
+  const mcp=place(deck,'Mode control panel',.17,.570,-12.959);mcp.rotation.x=-.055;
+  const mcpWidth=2.50,mcpHeight=.245;
+  roundedBox(mcp,finish.coaming,0,0,-.044,mcpWidth+.10,mcpHeight+.067,.098);
+  faceRing(mcp,finish.edge,mcpWidth+.057,mcpHeight+.062,.025,.024,.014,.035);
+  display(mcp,'ap','Mode control display',mcpWidth,mcpHeight,1140,175,.026);
+  roundedBox(mcp,finish.panel,0,-.156,-.008,mcpWidth+.053,.081,.047);
+  const apKnobs=[];
+  for(const [i,id,label,inc] of [[0,'speed','Speed',5],[1,'heading','Heading',5],[2,'altitude','Altitude',1000],[3,'vs','Vertical speed',250]]) {
+    const x=-mcpWidth*.375+i*mcpWidth*.25;
+    apKnobs.push(selector(mcp,x,-.158,.039,.044,id,label,inc));
+    screw(mcp,x+.124,-.144,.033,.008);
+  }
+  selector(mcp,-.673,-.159,.038,.033,'ndRange','Navigation range');
+  controlLabel(mcp,'RNG',-.567,-.159,.041,.085,.037,warmInk);
+  action(keycap(mcp,-.012,-.158,.044,.124,.060),'systemPage','Systems page');
+  controlLabel(mcp,'SYS',-.012,-.158,.063,.093,.039,warmInk);
+  const apSwitch=action(keycap(mcp,.606,-.158,.043,.142,.063),'ap','Autopilot');
+  apSwitch.name='Autopilot master';
+  controlLabel(mcp,'A/P',.591,-.159,.063,.083,.039);
+  const apLamp=keep(noShadow(box(mcp,finish.backlight,.659,-.152,.064,.022,.010,.005)));
+  for(const side of [-1,1]){
+    const x=side<0?-1.74:1.92;
+    const plate=place(deck,side<0?'Flight director and dimmer':'Autopilot mode bank',x,.461,-13.063+fasciaAt(x)[0]*.65);
+    plate.rotation.set(-.06,-side*.08,0);
+    roundedBox(plate,finish.coaming,0,0,-.027,.49,.30,.079);
+    for(let i=0;i<3;i++){
+      keycap(plate,(i-1)*.128,.066,.025,.099,.052);
+      controlLabel(plate,(side<0?['FD','BARO','LOC']:['LNAV','VNAV','APP'])[i],(i-1)*.128,.066,.044,.091,.037);
+    }
+    for(const p of [-.201,.201])screw(plate,p,-.118,.024,.010);
+    if(side<0){
+      selector(plate,-.093,-.060,.027,.046,'cockpitDim','Cockpit lighting');
+      controlLabel(plate,'DIM',.083,-.063,.044,.098,.039,warmInk);
+    }else controlLabel(plate,'FLT CONTROL',0,-.060,.027,.306,.045,warmInk);
+  }
+  const gearPanel=place(deck,'Landing gear panel',-2.22,-.076,-12.935);
+  gearPanel.rotation.y=.12;
+  roundedBox(gearPanel,finish.coaming,0,0,-.032,.18,.362,.071);
+  roundedBox(gearPanel,finish.rubber,0,-.016,.010,.079,.244,.022);
+  controlLabel(gearPanel,'GEAR',0,.134,.023,.135,.041,warmInk);
+  const gearSelector=keep(place(gearPanel,'Landing gear handle',0,-.036,.028));
+  const gearStem=moldedBeam(gearSelector,finish.brushed,[0,-.04,0],[0,.075,.105],.035,.036);
+  action(gearStem,'gear','Landing gear');
+  action(roundedBox(gearSelector,finish.ivory,0,.076,.112,.112,.051,.071),'gear','Landing gear');
+
+  // Sloped center pedestal: CDU keys, textured panels and a working twin-throttle quadrant.
+  const pedestal=place(deck,'Center pedestal',.08,-.590,-12.98);pedestal.rotation.x=.202;
+  roundedBox(pedestal,finish.wall,0,-.265,.025,1.05,.61,2.14);
+  roundedBox(pedestal,finish.panel,0,.039,.036,1.11,.087,2.12);
+  for(const side of [-1,1]){
+    moldedBeam(pedestal,finish.trim,[side*.531,.075,-.91],[side*.531,.077,1.01],.026,.030);
+    roundedBox(pedestal,finish.rubber,side*.39,.087,-.55,.25,.044,.63);
+  }
+  const consoleTexture=canvasTexture(840,700,(ctx,w,h)=>{
+    ctx.fillStyle='#101720';ctx.fillRect(0,0,w,h);
+    for(let row=0;row<3;row++)for(let col=0;col<3;col++){
+      const x=13+col*273,y=13+row*228;
+      ctx.fillStyle='#182430';ctx.fillRect(x,y,256,211);
+      ctx.strokeStyle='#536174';ctx.lineWidth=2;ctx.strokeRect(x+2,y+2,252,207);
+      ctx.fillStyle='#8ebac9';ctx.font='600 18px monospace';
+      ctx.fillText([['COM 1','FMS / LEGS','COM 2'],['NAV 1','PERF INIT','NAV 2'],['ADF','PANEL TEST','AUDIO']][row][col],x+16,y+31);
+      ctx.font='600 28px monospace';ctx.fillStyle=row===1?'#b1d8c2':'#a7d2e6';
+      ctx.fillText([['124.850','ACTIVE','121.900'],['113.70','CRZ 320','115.50'],['0320','NORMAL','INT']][row][col],x+16,y+67);
+      for(let i=0;i<3;i++){
+        ctx.fillStyle=i===2?'#a48661':'#475e6e';ctx.fillRect(x+16,y+99+i*27,82-i*13,3);ctx.fillRect(x+150,y+99+i*27,68+i*7,3);
+      }
+    }
+  }).texture;
+  const consoleSurface=texturePlane(pedestal,consoleTexture,0,.096,-.482,.973,.694);
+  consoleSurface.rotation.x=-Math.PI/2;
+  for(let row=0;row<5;row++)for(let col=0;col<9;col++){
+    const x=(col-4)*.099,z=-.755+row*.105;
+    noShadow(roundedBox(pedestal,finish.edge,x,.106,z,.058,.025,.040));
+    if((row+col)%4===0)noShadow(box(pedestal,coolLight,x,.12,z,.019,.004,.007));
+  }
+  for(const side of [-1,1])for(let i=0;i<3;i++)cylinder(pedestal,finish.brushed,side*.484,.109,-.73+i*.23,.027,.047);
+  roundedBox(pedestal,finish.coaming,0,.10,.464,.713,.119,1.01);
+  const rail=place(pedestal,'Throttle guide rails',0,.171,.448);
+  for(const x of [-.119,.119]){
+    roundedBox(rail,finish.rubber,x,-.016,0,.162,.041,.883);
+    for(const side of [-1,1])noShadow(roundedBox(rail,finish.brushed,x+side*.066,.01,0,.014,.015,.777));
+    for(let i=0;i<10;i++)noShadow(box(rail,i%3===0?finish.backlight:finish.trim,x+.076,.016,-.34+i*.077,.018,.006,.008));
+    const lever=keep(place(rail,'Thrust lever',x,0,.164));
+    cylinder(lever,finish.coaming,0,.052,0,.065,.10).rotation.z=Math.PI/2;
+    moldedBeam(lever,finish.brushed,[0,0,0],[0,.278,-.131],.055,.083);
+    roundedBox(lever,finish.rubber,0,.273,-.114,.109,.116,.19);
+    action(roundedBox(lever,finish.ivory,0,.324,-.159,.144,.080,.185),'throttle','Engine power');
+    action(noShadow(roundedBox(lever,finish.edge,0,.362,-.167,.082,.010,.109)),'throttle','Engine power');
+    moving.throttles.push(lever);
+  }
+  roundedBox(rail,finish.rubber,.316,.015,-.028,.086,.036,.73);
+  for(let i=0;i<5;i++)noShadow(box(rail,finish.backlight,.355,.038,-.31+i*.116,.018,.008,.012));
+  const flapLever=keep(place(rail,'Flaps detent lever',.315,.021,.06));
+  moldedBeam(flapLever,finish.brushed,[0,0,0],[0,.215,-.08],.033,.058);
+  action(roundedBox(flapLever,finish.ivory,0,.224,-.088,.109,.057,.122),'flaps','Flaps');
+  moving.flapLever=flapLever;
+  const leverLegend=controlLabel(rail,'THRUST                FLAPS',0,.027,.443,.57,.070,warmInk);leverLegend.rotation.x=-Math.PI/2;
+
+  // Two articulated, multi-part yokes. Their fixed columns are separate from the moving control heads.
+  const yokeBadge=textTexture('✈\nSkyJourney','#c7c1b4',36,256,182);
+  const yokeCurve=new THREE.CatmullRomCurve3([
+    [-.488,.256,0],[-.52,.056,.018],[-.515,-.193,.022],[-.447,-.264,.008],[-.28,-.273,.015],
+    [0,-.272,.031],[.28,-.273,.015],[.447,-.264,.008],[.515,-.193,.022],[.52,.056,.018],[.488,.256,0]
+  ].map(point=>new THREE.Vector3(...point)));
+  const yokeBody=register(new THREE.TubeGeometry(yokeCurve,42,.064,12,false));
+  for(const x of [-1.164,1.326]){
+    const column=place(deck,'Yoke column',x,-.685,-12.969);
+    roundedBox(column,finish.coaming,0,-.485,.145,.34,.18,.41);
+    moldedBeam(column,finish.wall,[0,-.503,.18],[0,.11,.009],.183,.207);
+    moldedBeam(column,finish.edge,[0,-.458,.27],[0,.075,.105],.099,.048);
+    const yoke=keep(place(column,'Yoke control head',0,.156,.09));moving.yokes.push(yoke);
+    mesh(yokeBody,finish.leather,yoke);
+    roundedBox(yoke,finish.coaming,0,-.112,.009,.475,.399,.176);
+    roundedBox(yoke,finish.brushed,0,-.104,.109,.431,.360,.031);
+    roundedBox(yoke,finish.rubber,0,-.104,.134,.396,.325,.026);
+    texturePlane(yoke,yokeBadge,0,-.100,.151,.30,.208);
+    for(const side of [-1,1]){
+      const hand=mesh(shared.capsule,finish.leather,yoke,side*.502,.158,.011);hand.scale.set(.078,.079,.081);hand.rotation.z=side*.154;
+      const hood=roundedBox(yoke,finish.coaming,side*.496,.302,.008,.155,.146,.138);hood.rotation.z=side*.20;
+      const thumb=cylinder(yoke,finish.edge,side*.492,.309,.088,.050,.026);thumb.rotation.x=Math.PI/2;
+      noShadow(cylinder(yoke,finish.rubber,side*.492,.310,.105,.038,.012)).rotation.x=Math.PI/2;
+      noShadow(roundedBox(yoke,finish.accent,side*.479,.155,.092,.034,.084,.018)).rotation.z=side*.13;
+    }
   }
 
-  // Personal items: ceramic pot, individual curved leaves, embossed notebook.
-  const plantStart=cabin.children.length;
-  const pot=cylinder(cabin,ivory,-2.0,-.315,-12.91,.183,.31);
-  mesh(register(new THREE.TorusGeometry(.185,.018,8,24)),ivory,cabin,-2.0,-.148,-12.91).rotation.x=Math.PI/2;
-  cylinder(cabin,material('#3e3527',.95,0),-2.0,-.15,-12.91,.166,.014);
-  const leafMaterials=[material('#527443',.56,.0,{side:THREE.DoubleSide}),material('#849146',.52,0,{side:THREE.DoubleSide}),material('#405f37',.58,0,{side:THREE.DoubleSide})];
-  const stemMaterial=material('#53643d',.8,0);
-  for(let i=0;i<15;i++) {
-    const angle=i*2.39996, length=.2+(i%4)*.053, stemHeight=.2+(i%5)*.055;
-    const end=[-2.0+Math.sin(angle)*length*.8,-.14+stemHeight,-12.91+Math.cos(angle)*length*.8];
-    beam(cabin,stemMaterial,[-2.0,-.14,-12.91],end,.009);
-    const geo=register(new THREE.BufferGeometry()),verts=[],indices=[];
-    for(let row=0;row<=8;row++){const t=row/8,width=Math.sin(t*Math.PI)*.066;for(let col=0;col<3;col++){const u=col-1;verts.push(u*width,Math.sin(t*Math.PI)*.05+t*.035+(1-u*u)*width*.27,t*length);}}
-    for(let row=0;row<8;row++)for(let col=0;col<2;col++){const a=row*3+col;indices.push(a,a+3,a+1,a+1,a+3,a+4);}
-    geo.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));geo.setIndex(indices);geo.computeVertexNormals();
-    const leaf=mesh(geo,leafMaterials[i%3],cabin,...end);leaf.rotation.y=angle;leaf.rotation.x=.2+(i%4)*.12;
+  for(const x of [-1.15,1.30]){
+    roundedBox(deck,finish.fabric,x,-.803,-10.54,.97,.27,1.05);
+    roundedBox(deck,finish.leather,x,-.08,-10.09,.97,1.16,.20).rotation.x=-.08;
+    roundedBox(deck,finish.fabric,x,.69,-10.07,.60,.31,.27);
+    for(const side of [-1,1])roundedBox(deck,finish.edge,x+side*.55,-.40,-10.69,.134,.13,.87);
   }
-  const plantAssembly=new THREE.Group();plantAssembly.position.set(-2.28,-.25,-13.25);plantAssembly.scale.setScalar(.65);
-  cabin.children.slice(plantStart).forEach(object=>{object.position.sub(new THREE.Vector3(-2,-.47,-12.91));plantAssembly.add(object);});cabin.add(plantAssembly);
-  const notebookTexture=canvasTexture(512,640,ctx=>{
-    ctx.fillStyle='#232c35';ctx.fillRect(0,0,512,640);ctx.strokeStyle='#5c574c';ctx.lineWidth=8;ctx.strokeRect(8,8,496,624);
-    ctx.fillStyle='#b99763';ctx.font='500 35px Arial';ctx.textAlign='center';['EXPLORE','PRACTICE','IMPROVE'].forEach((t,i)=>ctx.fillText(t,256,225+i*55));
-    ctx.fillStyle='#aeb0ad';ctx.font='italic 31px Georgia';['More skies,','brighter days.'].forEach((t,i)=>ctx.fillText(t,256,471+i*39));
+
+  // Side ledges and smaller props sit outside the main instrument sight lines.
+  for(const side of [-1,1]){
+    const ledge=roundedBox(deck,finish.panel,side*2.25,-.493,-12.25,.77,.105,1.52);
+    ledge.rotation.y=side*.09;
+    moldedBeam(deck,finish.trim,[side*1.895,-.427,-12.95],[side*1.853,-.449,-11.57],.023,.031);
+  }
+  const soil=material('#3e3024',.94,0),coffeeMaterial=material('#372317',.36,.01);
+  const plant=place(deck,'Potted window plant',-2.36,-.450,-12.89);
+  const potProfile=[[0,0],[.094,0],[.112,.014],[.128,.145],[.145,.192],[.149,.21],[.142,.219],[.130,.215],[.121,.192],[.109,.043],[0,.036]];
+  mesh(register(new THREE.LatheGeometry(potProfile.map(p=>new THREE.Vector2(...p)),28)),finish.ivory,plant);
+  cylinder(plant,soil,0,.193,0,.123,.014);
+  const leaves=[material('#52653a',.54,0,{side:THREE.DoubleSide}),material('#77804b',.53,0,{side:THREE.DoubleSide}),material('#354e34',.56,0,{side:THREE.DoubleSide})];
+  const stems=material('#53613a',.80,0);
+  for(let i=0;i<13;i++){
+    const a=i*2.39996,l=.118+(i%4)*.033,h=.13+(i%5)*.034;
+    const end=[Math.sin(a)*l*.57,.187+h,Math.cos(a)*l*.57];
+    moldedBeam(plant,stems,[0,.187,0],end,.007,.007);
+    const verts=[],norm=[],indices=[];
+    for(let row=0;row<=8;row++){
+      const t=row/8,w=Math.sin(t*Math.PI)*(.029+(i%3)*.005);
+      for(let col=0;col<3;col++){
+        const u=col-1;verts.push(u*w,Math.sin(t*Math.PI)*.026+t*.018+(1-u*u)*w*.28,t*l);
+        norm.push(col/2,t);
+      }
+    }
+    for(let row=0;row<8;row++)for(let col=0;col<2;col++){
+      const j=row*3+col;indices.push(j,j+3,j+1,j+1,j+3,j+4);
+    }
+    const g=register(new THREE.BufferGeometry());g.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(norm,2));g.setIndex(indices);g.computeVertexNormals();
+    const leaf=mesh(g,leaves[i%3],plant,...end);leaf.rotation.set(.16+(i%4)*.15,a,0);
+  }
+  const bookArt=canvasTexture(512,640,(ctx,w,h)=>{
+    ctx.fillStyle='#252a35';ctx.fillRect(0,0,w,h);
+    ctx.strokeStyle='#897653';ctx.lineWidth=4;ctx.strokeRect(19,19,w-38,h-38);
+    ctx.strokeStyle='#585057';ctx.lineWidth=2;ctx.strokeRect(29,29,w-58,h-58);
+    ctx.textAlign='center';ctx.fillStyle='#c8a46c';ctx.font='600 39px Arial';
+    ['EXPLORE','PRACTICE','IMPROVE'].forEach((t,i)=>ctx.fillText(t,w/2,215+i*57));
+    ctx.fillStyle='#ac9f8f';ctx.font='italic 28px Georgia';ctx.fillText('More skies, brighter days.',w/2,468);
   }).texture;
-  const notebookGroup=new THREE.Group();notebookGroup.position.set(-1.94,-.61,-12.44);notebookGroup.rotation.set(-.32,.13,.03);cabin.add(notebookGroup);
-  box(notebookGroup,paper,0,0,0,.64,.037,.79);
-  box(notebookGroup,navy,0,.023,0,.67,.015,.81);
-  texturePlane(notebookGroup,notebookTexture,0,.032,0,.65,.79).rotation.x=-Math.PI/2;
-  // Right tray and actual hollow mug; the handle is a torus rather than a sprite.
-  const rightAccessoriesStart=cabin.children.length;
-  box(cabin,graphiteEdge,2.04,-.47,-11.93,1.03,.08,1.36);
-  box(cabin,paper,1.91,-.409,-11.99,.6,.045,.73).rotation.y=.10;
-  for(let i=0;i<11;i++) box(cabin,warmTrim,1.91,-.384,-12.25+i*.042,.48,.0015,.002);
-  const pen=cylinder(cabin,rubber,2.07,-.359,-11.71,.013,.65);pen.rotation.z=Math.PI/2;pen.rotation.y=-.33;
-  const mug=mesh(register(new THREE.CylinderGeometry(.182,.159,.36,32,1,true)),ivory,cabin,2.31,-.235,-12.11);
-  const coffee=cylinder(cabin,material('#403126',.2,0),2.31,-.071,-12.11,.167,.009);
-  const mugRim=mesh(register(new THREE.TorusGeometry(.174,.016,8,32)),ivory,cabin,2.31,-.052,-12.11);mugRim.rotation.x=Math.PI/2;
-  const handle=mesh(register(new THREE.TorusGeometry(.105,.027,8,24)),ivory,cabin,2.52,-.24,-12.10);handle.rotation.y=Math.PI/2;
-  texturePlane(cabin,textTexture('Good Flights\nBrighter Tomorrows', '#4c4e4a', 29,512,192),2.31,-.23,-11.915,.28,.197);
-  mug.name='Ceramic Good Flights mug';coffee.name='Coffee surface';
-  const rightAccessories=new THREE.Group();rightAccessories.position.z=-.7;
-  cabin.children.slice(rightAccessoriesStart).forEach(object=>rightAccessories.add(object));cabin.add(rightAccessories);
-  // Warm indirect light is fixed to the actual deck, and follows the aircraft.
-  const cabinFill=new THREE.PointLight('#ffc38c',1.05,7,2);cabinFill.position.set(-1.55,.34,-12.5);cabin.add(cabinFill);
-  const coolFill=new THREE.PointLight('#a9c3e1',5.0,8,2);coolFill.position.set(.7,1.4,-11.3);cabin.add(coolFill);
+  const notebook=place(deck,'Left flight notebook',-2.052,-.416,-11.83);
+  notebook.rotation.set(-.09,.24,.02);
+  roundedBox(notebook,paper,0,0,0,.52,.033,.66);
+  roundedBox(notebook,finish.leather,0,.024,0,.552,.019,.693);
+  texturePlane(notebook,bookArt,0,.037,0,.527,.664).rotation.x=-Math.PI/2;
+
+  const notepad=place(deck,'Right flight notes',2.055,-.418,-11.92);notepad.rotation.y=-.14;
+  roundedBox(notepad,finish.leather,0,-.013,0,.60,.025,.70);
+  roundedBox(notepad,paper,0,.004,0,.572,.026,.674);
+  for(let i=0;i<12;i++)noShadow(box(notepad,finish.trim,0,.019,-.273+i*.041,.47,.0015,.002));
+  const pen=place(notepad,'Metal-tip pen',.065,.031,.136);pen.rotation.set(0,.36,Math.PI/2);
+  cylinder(pen,finish.coaming,0,0,0,.012,.43);cylinder(pen,finish.brushed,0,.225,0,.009,.048);
+  box(pen,finish.brushed,0,-.152,.013,.012,.094,.007);
+  const mug=place(deck,'Ceramic mug',2.305,-.450,-12.57);
+  const mugProfile=[[0,0],[.10,0],[.122,.016],[.137,.104],[.149,.221],[.149,.260],[.145,.274],[.135,.276],[.126,.269],[.127,.242],[.117,.079],[.090,.034],[0,.028]];
+  mesh(register(new THREE.LatheGeometry(mugProfile.map(p=>new THREE.Vector2(...p)),34)),finish.ivory,mug);
+  cylinder(mug,coffeeMaterial,0,.228,0,.127,.010);
+  mesh(register(new THREE.TorusGeometry(.071,.018,10,22)),finish.ivory,mug,.167,.148,-.008).rotation.y=-.12;
+  texturePlane(mug,textTexture('Good flights\nBrighter tomorrows','#514a47',28,512,164),0,.128,.151,.235,.132);
+
+  // Batch shared static pieces without changing raycast targets or articulated controls.
+  const primitiveGeometries=new Set(Object.values(shared));
+  const batches=new Map(),inverse=new THREE.Matrix4(),local=new THREE.Matrix4();
+  deck.updateMatrixWorld(true);inverse.copy(deck.matrixWorld).invert();
+  function collect(object){
+    if(live.has(object)||object.userData.action)return;
+    if(object.isMesh&&!object.isInstancedMesh&&primitiveGeometries.has(object.geometry)&&!Array.isArray(object.material)&&!object.material.transparent&&!object.material.map){
+      const key=object.geometry.uuid+object.material.uuid+Number(object.castShadow)+Number(object.receiveShadow);
+      if(!batches.has(key))batches.set(key,[]);
+      batches.get(key).push(object);
+    }
+    object.children.forEach(collect);
+  }
+  collect(deck);
+  for(const batch of batches.values()){
+    if(batch.length<3)continue;
+    const base=batch[0],instances=register(new THREE.InstancedMesh(base.geometry,base.material,batch.length));
+    instances.castShadow=base.castShadow;instances.receiveShadow=base.receiveShadow;
+    instances.name='Flight deck · instanced details';
+    batch.forEach((object,i)=>{local.copy(inverse).multiply(object.matrixWorld);instances.setMatrixAt(i,local);object.removeFromParent();});
+    deck.add(instances);
+  }
 
   const clamp=THREE.MathUtils.clamp;
   const num=(value,fallback=0)=>Number.isFinite(value)?value:fallback;
-  const degree=r=>r*180/Math.PI;
-  function base(ctx,w,h,title) {
-    ctx.fillStyle='#081521';ctx.fillRect(0,0,w,h);
-    const shade=ctx.createLinearGradient(0,0,0,h);shade.addColorStop(0,'#172c3c');shade.addColorStop(1,'#07101b');ctx.fillStyle=shade;ctx.fillRect(0,0,w,h);
-    ctx.strokeStyle='#375466';ctx.lineWidth=2;ctx.strokeRect(2,2,w-4,h-4);
-    ctx.font=`500 ${Math.round(w*.028)}px Arial`;ctx.fillStyle='#b7d7e4';ctx.textAlign='left';ctx.fillText(title,18,28);
-  }
-  function drawPFD(state,ap) {
-    const ctx=pfd.context,w=pfd.canvas.width,h=pfd.canvas.height;
-    base(ctx,w,h,'PFD  •  SKYJOURNEY');
-    const cx=w*.5,cy=h*.47,r=w*.29;
-    ctx.save();ctx.beginPath();ctx.roundRect(cx-r,cy-r,r*2,r*2,r*.18);ctx.clip();
-    ctx.translate(cx,cy);ctx.rotate(-num(state.roll));ctx.translate(0,degree(num(state.pitch))*3.3);
-    ctx.fillStyle='#4379bd';ctx.fillRect(-w,-h*3,w*2,h*3);ctx.fillStyle='#b97b42';ctx.fillRect(-w,0,w*2,h*3);
-    ctx.strokeStyle='#e4d6b5';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-w,0);ctx.lineTo(w,0);ctx.stroke();
-    for(let p=-30;p<=30;p+=5) if(p!==0) {
-      const yy=-p*3.3,half=p%10===0?51:26;ctx.strokeStyle='#e3eced';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(-half,yy);ctx.lineTo(half,yy);ctx.stroke();
-      if(p%10===0){ctx.fillStyle='#eef2ef';ctx.font='15px Arial';ctx.textAlign='right';ctx.fillText(Math.abs(p),-half-8,yy+5);ctx.textAlign='left';ctx.fillText(Math.abs(p),half+8,yy+5);}
-    }
-    ctx.restore();
-    ctx.strokeStyle='#f4d78a';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(cx-64,cy);ctx.lineTo(cx-19,cy);ctx.lineTo(cx-19,cy+9);ctx.moveTo(cx+64,cy);ctx.lineTo(cx+19,cy);ctx.lineTo(cx+19,cy+9);ctx.stroke();
-    ctx.strokeStyle='#c9dcdf';ctx.lineWidth=2;
-    for(let a=-60;a<=60;a+=10){const rad=(a-90)*Math.PI/180;const inner=r+(a%30===0?0:6);ctx.beginPath();ctx.moveTo(cx+Math.cos(rad)*inner,cy+Math.sin(rad)*inner);ctx.lineTo(cx+Math.cos(rad)*(r+13),cy+Math.sin(rad)*(r+13));ctx.stroke();}
-    const speed=num(state.ias,280),alt=num(state.altitude,32000);
-    for(const [x,val,step] of [[w*.08,speed,20],[w*.81,alt,1000]]){
-      ctx.fillStyle='#293b52';ctx.fillRect(x,cy-r, w*.115,r*2);
-      ctx.textAlign='center';ctx.font='17px monospace';ctx.fillStyle='#c7dce4';
-      for(let i=-3;i<=3;i++){const v=Math.round(val/step)*step+i*step;const yy=cy-(v-val)*(r/3)/step;if(yy>cy-r+18&&yy<cy+r-12)ctx.fillText(Math.max(0,v),x+w*.057,yy+5);}
-      ctx.fillStyle='#0a131d';ctx.fillRect(x-5,cy-18,w*.135,37);ctx.strokeStyle='#d3deb9';ctx.lineWidth=2;ctx.strokeRect(x-5,cy-18,w*.135,37);ctx.fillStyle='#edeee6';ctx.font='bold 24px monospace';ctx.fillText(Math.round(val),x+w*.057,cy+8);
-    }
-    const vs=num(state.verticalSpeed),heading=((degree(num(state.heading))%360)+360)%360;
-    ctx.fillStyle='#b9d5df';ctx.textAlign='right';ctx.font='17px monospace';ctx.fillText(`VS ${vs>=0?'+':''}${Math.round(vs)}`,w-20,h-62);
-    ctx.textAlign='center';ctx.font='25px monospace';ctx.fillText(`${Math.round(heading).toString().padStart(3,'0')}°`,cx,h-62);
-    ctx.strokeStyle='#658293';ctx.beginPath();ctx.arc(cx,h-75,w*.21,Math.PI*1.15,Math.PI*1.85);ctx.stroke();
-    ctx.font='17px Arial';ctx.fillStyle=ap?.enabled?'#91e0ba':'#b8cfe1';ctx.fillText(ap?.enabled?'AP  •  FLIGHT DIRECTOR':'MANUAL  •  ASSISTED FLIGHT',cx,58);
-    ctx.fillStyle='#7fadc0';ctx.font='14px Arial';ctx.fillText('IAS · KTS           ALT · FT           ATTITUDE',cx,h-20);
-    pfd.texture.needsUpdate=true;
-  }
-  const flightTrack=[];
-  let lastTrackPosition=null;
-  function drawND(state,world={}) {
-    const ctx=nd.context,w=nd.canvas.width,h=nd.canvas.height;
-    base(ctx,w,h,'NAV  •  ISLAND EXPLORER');
-    const pos=state.position||{x:0,z:0};
-    const mapX=w*.51,mapY=h*.70,mapRadius=w*.36,mapScale=mapRadius/50000;
-    const heading=num(state.heading),cosHeading=Math.cos(heading),sinHeading=Math.sin(heading);
-    const mapPoint=(x,z)=>{const dx=x-num(pos.x),dz=z-num(pos.z);return [mapX+(dx*cosHeading+dz*sinHeading)*mapScale,mapY+(-dx*sinHeading+dz*cosHeading)*mapScale];};
-    ctx.save();ctx.beginPath();ctx.rect(w*.145,55,w*.73,h-95);ctx.clip();
-    ctx.fillStyle='#112a41';ctx.fillRect(w*.145,55,w*.73,h-95);
-    ctx.strokeStyle='#243d51';ctx.lineWidth=1;
-    for(let i=-2;i<=2;i++){ctx.beginPath();ctx.moveTo(mapX+i*mapRadius*.4,55);ctx.lineTo(mapX+i*mapRadius*.4,h-40);ctx.moveTo(w*.145,mapY+i*mapRadius*.4);ctx.lineTo(w*.875,mapY+i*mapRadius*.4);ctx.stroke();}
-    const islands=world.islands||[];
-    for(const island of islands){
-      const [ix,iy]=mapPoint(island.x,island.z),radiusX=num(island.rx,num(island.radius,3500))*mapScale,radiusZ=num(island.rz,num(island.radius,3500))*mapScale;
-      if(ix+radiusX*1.3<0||ix-radiusX*1.3>w||iy+radiusZ*1.3<0||iy-radiusZ*1.3>h)continue;
-      ctx.beginPath();for(let i=0;i<64;i++){const a=i/64*Math.PI*2;const seed=num(island.seed);const ripple=world.coast?world.coast(island,a):1+.14*Math.sin(a*3+seed)+.085*Math.sin(a*7-seed)+.045*Math.sin(a*13+seed*3);const x=ix+Math.cos(a)*radiusX*ripple,y=iy+Math.sin(a)*radiusZ*ripple;(i?ctx.lineTo(x,y):ctx.moveTo(x,y));}ctx.closePath();ctx.fillStyle='#607663';ctx.fill();ctx.strokeStyle='#b5b19b';ctx.lineWidth=2;ctx.stroke();
-      ctx.beginPath();ctx.ellipse(ix-radiusX*.12,iy+radiusZ*.05,radiusX*.48,radiusZ*.36,.3,0,Math.PI*2);ctx.fillStyle='#85907a';ctx.fill();
-    }
-    const route=Array.isArray(world.route)?world.route:world.route?.waypoints||world.waypoints||[];
-    if(route.length){ctx.strokeStyle='#de7bc4';ctx.lineWidth=2.5;ctx.beginPath();route.forEach((point,i)=>{const [x,y]=mapPoint(point.x??point.position?.x??0,point.z??point.position?.z??0);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
-      route.forEach((point,i)=>{const [x,y]=mapPoint(point.x??point.position?.x??0,point.z??point.position?.z??0);ctx.strokeStyle='#e4a0d5';ctx.lineWidth=1.4;ctx.strokeRect(x-4,y-4,8,8);ctx.fillStyle='#e5d4e4';ctx.font='12px Arial';ctx.fillText(point.name||`SJ${i+1}`,x+8,y-5);});}
-    if(flightTrack.length>1){ctx.strokeStyle='#71b6b2';ctx.lineWidth=1.8;ctx.beginPath();flightTrack.forEach((point,i)=>{const [x,y]=mapPoint(point.x,point.z);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();}
-    ctx.save();ctx.translate(mapX,mapY);ctx.fillStyle='#f0f2e9';ctx.beginPath();ctx.moveTo(0,-23);ctx.lineTo(4,-3);ctx.lineTo(20,9);ctx.lineTo(20,12);ctx.lineTo(4,7);ctx.lineTo(3,21);ctx.lineTo(10,26);ctx.lineTo(10,29);ctx.lineTo(0,26);ctx.lineTo(-10,29);ctx.lineTo(-10,26);ctx.lineTo(-3,21);ctx.lineTo(-4,7);ctx.lineTo(-20,12);ctx.lineTo(-20,9);ctx.lineTo(-4,-3);ctx.closePath();ctx.fill();ctx.restore();
-    ctx.strokeStyle='#78939e';ctx.lineWidth=1;ctx.setLineDash([4,7]);ctx.beginPath();ctx.arc(mapX,mapY,mapRadius*.7,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);ctx.restore();
-    const next=route[world.currentWaypoint??world.route?.index??world.route?.currentWaypoint??0];
-    const distance=next?Math.hypot((next.x??next.position?.x??0)-num(pos.x),(next.z??next.position?.z??0)-num(pos.z))/1852:0;
-    const eta=distance/Math.max(1,num(state.groundSpeed,280))*60;
-    ctx.fillStyle='#c5dce5';ctx.textAlign='left';ctx.font='18px Arial';ctx.fillText('SPD',15,89);ctx.font='27px monospace';ctx.fillText(Math.round(num(state.ias,280)),15,121);
-    ctx.font='18px Arial';ctx.fillText('ALT',15,185);ctx.font='24px monospace';ctx.fillText(Math.round(num(state.altitude,32000)),15,215);
-    ctx.font='18px Arial';ctx.fillText('HDG',15,283);ctx.font='25px monospace';ctx.fillText(`${Math.round(((degree(num(state.heading))%360)+360)%360)}°`,15,314);
-    ctx.textAlign='right';ctx.font='15px Arial';ctx.fillText(next?.name||'FREE FLIGHT',w-16,89);ctx.font='19px monospace';ctx.fillText(next?`${distance.toFixed(0)} NM`:'—',w-16,120);ctx.font='15px Arial';ctx.fillText('ETA',w-16,188);ctx.font='20px monospace';ctx.fillText(next?`${Math.floor(eta/60).toString().padStart(2,'0')}:${Math.floor(eta%60).toString().padStart(2,'0')}`:'—',w-16,217);
-    ctx.textAlign='center';ctx.font='15px Arial';ctx.fillStyle='#8baebe';ctx.fillText('RANGE  27 NM      •      HEADING UP',w*.51,h-17);
-    nd.texture.needsUpdate=true;
-  }
-  function ring(ctx,x,y,r,value,color) {
-    ctx.lineWidth=11;ctx.strokeStyle='#314350';ctx.beginPath();ctx.arc(x,y,r,Math.PI*.72,Math.PI*2.28);ctx.stroke();
-    ctx.strokeStyle=color;ctx.beginPath();ctx.arc(x,y,r,Math.PI*.72,Math.PI*.72+Math.PI*1.56*clamp(value/100,0,1));ctx.stroke();
-    ctx.font='bold 29px Arial';ctx.textAlign='center';ctx.fillStyle='#e2eee5';ctx.fillText(`${Math.round(value)}%`,x,y+9);
-  }
-  function drawEngines(state) {
-    const ctx=engines.context,w=engines.canvas.width,h=engines.canvas.height;
-    base(ctx,w,h,'ENGINES  •  POWERPLANT');
-    const n1=num(state.n1,27+num(state.throttle,.68)*71);
-    const temperature=num(state.temperature,12),egt=num(state.egt,350+(n1-20)/78*420);
-    for(let i=0;i<2;i++){
-      const x=w*(.265+i*.47);
-      ctx.fillStyle='#cce1e3';ctx.textAlign='center';ctx.font='25px Arial';ctx.fillText(`ENG ${i+1}`,x,84);
-      ring(ctx,x,180,66,n1,'#7fc5a1');ctx.font='18px Arial';ctx.fillStyle='#b1d4d5';ctx.fillText('N1',x,277);
-      ctx.font='27px monospace';ctx.fillStyle='#d5e8e5';ctx.fillText(`${Math.round(egt)} °C`,x,320);
-      ctx.font='17px Arial';ctx.fillStyle='#8dabb8';ctx.fillText('EGT',x,349);
-      ctx.font='24px monospace';ctx.fillStyle='#cee4df';ctx.fillText(`${(num(state.fuelFlow,(.06+(n1-20)/78*.73)/2)*3.6).toFixed(1)} t/h`,x,396);ctx.font='16px Arial';ctx.fillStyle='#8dabb8';ctx.fillText('FUEL FLOW',x,426);
-    }
-    ctx.strokeStyle='#35505d';ctx.beginPath();ctx.moveTo(25,459);ctx.lineTo(w-25,459);ctx.stroke();
-    ctx.font='20px Arial';ctx.fillStyle='#b6d7d7';ctx.textAlign='left';const fuel=num(state.fuel,82);ctx.fillText(`FUEL ${fuel>100?(fuel/1000).toFixed(1)+' t':Math.round(fuel)+'%'}`,27,501);ctx.textAlign='right';ctx.fillText(`OAT ${Math.round(temperature)} °C`,w-27,501);
-    ctx.textAlign='center';ctx.font='15px Arial';ctx.fillStyle='#7daf99';ctx.fillText('DUAL ENGINE  •  STABLE OPERATION',w*.5,h-19);
-    engines.texture.needsUpdate=true;
-  }
-  function drawSystems(state) {
-    const ctx=systems.context,w=systems.canvas.width,h=systems.canvas.height;
-    base(ctx,w,h,'AIRCRAFT SYSTEMS');
-    const cx=w*.5;ctx.save();ctx.translate(cx,h*.38);
-    ctx.strokeStyle='#8eb5ca';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(0,-112);ctx.bezierCurveTo(22,-111,21,-53,19,-30);ctx.lineTo(122,49);ctx.lineTo(127,77);ctx.lineTo(19,28);ctx.lineTo(16,96);ctx.lineTo(60,127);ctx.lineTo(57,145);ctx.lineTo(0,119);ctx.lineTo(-57,145);ctx.lineTo(-60,127);ctx.lineTo(-16,96);ctx.lineTo(-19,28);ctx.lineTo(-127,77);ctx.lineTo(-122,49);ctx.lineTo(-19,-30);ctx.bezierCurveTo(-21,-53,-22,-111,0,-112);ctx.closePath();ctx.stroke();
-    ctx.fillStyle='#9ed7b0';for(const x of [-48,48]){ctx.beginPath();ctx.ellipse(x,18,7,19,0,0,Math.PI*2);ctx.fill();}ctx.restore();
-    const fuel=num(state.fuel,82), gear=Boolean(state.gear), lowFuel=fuel<=100?fuel<15:fuel<1800;
-    const operationalStatus=typeof state.status==='string'&&/stall|overspeed|warning|collision|impact|damage|engine failure/i.test(state.status)?state.status:null;
-    const status=operationalStatus|| (lowFuel?'Fuel reserve advisory':gear?'Landing configuration':num(state.flaps)>0?'Flaps extended':'All systems normal');
-    ctx.textAlign='center';ctx.fillStyle=lowFuel?'#edd594':'#a1dfc0';ctx.font='20px Arial';ctx.fillText(status,cx,h*.74);
-    ctx.strokeStyle='#567480';ctx.beginPath();ctx.moveTo(w*.23,h*.785);ctx.lineTo(w*.77,h*.785);ctx.stroke();
-    ctx.font='22px Arial';ctx.fillStyle='#b2c2cd';ctx.fillText('Have a',cx,h*.86);ctx.fillText('nice flight',cx,h*.908);
-    systems.texture.needsUpdate=true;
-  }
-  function drawAP(state,ap={}) {
-    const ctx=apReadout.context,w=apReadout.canvas.width,h=apReadout.canvas.height;
-    ctx.fillStyle='#101821';ctx.fillRect(0,0,w,h);ctx.textAlign='center';
-    const values=[Math.round(num(ap.speed,num(state.ias,280))),Math.round(num(ap.heading,degree(num(state.heading)))),Math.round(num(ap.altitude,num(state.altitude,32000))),Math.round(num(ap.vs))];
-    ['SPD','HDG','ALT','VS'].forEach((label,i)=>{
-      const x=w*(.125+i*.25);ctx.fillStyle='#b6c9d4';ctx.font='25px Arial';ctx.fillText(label,x,40);ctx.fillStyle='#e0eee9';ctx.font='42px monospace';ctx.fillText(values[i],x,96);
-      ctx.fillStyle=ap.enabled?'#90cead':'#697b89';ctx.fillRect(x-12,126,24,4);
-      if(i){ctx.strokeStyle='#354047';ctx.beginPath();ctx.moveTo(w*i*.25,17);ctx.lineTo(w*i*.25,h-18);ctx.stroke();}
-    });apReadout.texture.needsUpdate=true;
-    apButton.material=ap.enabled?graphiteEdge:rubber;
-  }
-  let instrumentTime=-1000,lastFanTime=0;
+  let instrumentTime=-1000,lastFanTime=0,instrumentsReady=false;
   const cameraPositions={
     pilot:new THREE.Vector3(-.65,1.0,-11.3),copilot:new THREE.Vector3(.65,1.0,-11.3),
     cockpitTarget:new THREE.Vector3(.8,-1.8,-21),
@@ -607,19 +700,15 @@ export function createAircraft() {
     for(const yoke of moving.yokes){yoke.rotation.z=-num(controls.roll)*.62;yoke.position.z=.09+num(controls.pitch)*.075;}
     for(const lever of moving.throttles)lever.rotation.x=-(num(state.throttle,.68)-.5)*.84;
     moving.flapLever.rotation.x=flapSetting*.5;
+    gearSelector.rotation.x=(num(state.gear,state.gear?1:0)-.5)*.62;
+    apLamp.visible=Boolean(autopilot.enabled);
     for(let i=0;i<apKnobs.length;i++)apKnobs[i].rotation.z=((i===0?num(autopilot.speed,280):i===1?num(autopilot.heading):i===2?num(autopilot.altitude,32000)/100:num(autopilot.vs)/100)%10)*Math.PI/5;
     beaconMaterial.emissiveIntensity=.5+Math.max(0,Math.sin(now*.003))*1.3;
-    if(now-instrumentTime>100){
+    if(cabin.visible||!instrumentsReady)cabinLighting.update(world);
+    if(!instrumentsReady||(cabin.visible&&now-instrumentTime>=83)){
       instrumentTime=now;
-      const pos=state.position;
-      if(pos&&(!lastTrackPosition||Math.hypot(num(pos.x)-lastTrackPosition.x,num(pos.z)-lastTrackPosition.z)>180)){
-        lastTrackPosition={x:num(pos.x),z:num(pos.z)};flightTrack.push(lastTrackPosition);if(flightTrack.length>600)flightTrack.shift();
-      }
-      // Exterior flight also advances track, while texture work follows deck visibility.
-      if(cabin.visible||!screens[0].texture.image.__initialized){
-        drawPFD(state,autopilot);drawND(state,world);drawEngines(state);drawSystems(state);drawAP(state,autopilot);
-        screens[0].texture.image.__initialized=true;
-      }
+      painter.paint(screenSources,state,autopilot,world);
+      instrumentsReady=true;
     }
   }
   update({position:{x:0,y:9753,z:0},heading:0,pitch:0,roll:0,ias:280,altitude:32000,verticalSpeed:0,throttle:.68,gear:false,flaps:0,fuel:82,temperature:12},{},{enabled:true,speed:280,heading:0,altitude:32000,vs:0},{});
