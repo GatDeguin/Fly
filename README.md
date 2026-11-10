@@ -2,7 +2,15 @@
 
 Abrí **index.html** en un navegador moderno con WebGL2. El juego contiene Three.js, geometría, shaders, pantallas, estilos y audio dentro del mismo archivo. No necesita conexión, cuenta, CDN ni instalación para el vuelo normal. Para GitHub Pages basta publicar ese HTML.
 
+[SkyJourney.ico](SkyJourney.ico) es el icono para accesos directos de Windows y también está incluido en el HTML como favicon. Si editás el [original vectorial](assets/skyjourney-icon.svg), regenerá el icono con `node tools/build-icon.mjs` y después ejecutá `npm run build`.
+
 Comienza en crucero al atardecer. Flight permite elegir Zen, Standard o Simulation, cambiar el piloto automático y practicar despegue o aproximación en Solana. World ofrece seis rutas sobre el mismo archipiélago que muestran los mapas de navegación. Weather controla nueve climas y la hora. Camera permite doce vistas y fotografías PNG. Settings incluye idioma, calidad, audio, controles, movimiento del móvil y guardado/importación/exportación.
+
+## Academia de Aterrizaje
+
+En **Vuelo → Desafíos de aterrizaje** elegí una final corta a la pista 18 de Solana: de día, de noche o en tormenta. Empezás en cabina, con tren y flaps listos. La guía muestra distancia al punto de mira, velocidad, descenso y desviación del eje y de la senda. De noche, las luces de aproximación, umbral y eje ayudan a encontrar la pista.
+
+La nota se calcula al tocar el suelo: cuenta dónde apoyaste, el impacto, la alineación y la velocidad. El resultado explica qué corregir y guarda tu mejor puntaje por escenario en este navegador. Podés **Reintentar** o **Retomar vuelo libre** para volver al avión, clima y cámara que tenías antes de entrar.
 
 | Control | Acción |
 |---|---|
@@ -50,7 +58,7 @@ La orientación, vibración y gamepad físico necesitan comprobación con los di
 
 Desarrollo con Node.js 22 o posterior: `npm ci`, `npm run build` y `npm test`. La carpeta `artifacts` contiene capturas de verificación. No se necesita para jugar.
 
-Para las pruebas de navegador, instalá Chromium con `npx playwright install chromium`. Ejecutá `node tests/qr-dialog-browser.mjs`, `node tests/mobile-qr-browser.cjs` y `node tests/motion-browser.mjs`. Para el recorrido completo, dejá `node tools/preview.mjs` activo en otra terminal y ejecutá `node tests/browser-smoke.mjs`. Opcionalmente, la variable `SKYJOURNEY_BROWSER_CHANNEL=chrome` permite usar Google Chrome ya instalado. [Guía de instalación de Playwright](https://playwright.dev/docs/library).
+Para las pruebas de navegador, instalá Chromium con `npx playwright install chromium`. Ejecutá `node tests/academy-browser.mjs`, `node tests/qr-dialog-browser.mjs`, `node tests/mobile-qr-browser.cjs` y `node tests/motion-browser.mjs`. Para el recorrido completo, dejá `node tools/preview.mjs` activo en otra terminal y ejecutá `node tests/browser-smoke.mjs`. Opcionalmente, la variable `SKYJOURNEY_BROWSER_CHANNEL=chrome` permite usar Google Chrome ya instalado. [Guía de instalación de Playwright](https://playwright.dev/docs/library).
 
 Three.js está incluido bajo su licencia MIT. La aplicación no incorpora las imágenes de referencia como fondo ni carga modelos, texturas, música o servicios externos.
 

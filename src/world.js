@@ -15,6 +15,86 @@ export const WEATHER={
  'Thunderstorm':{clouds:1,haze:.85,wind:30,rain:1,time:13,temp:10},
  'Starry Night':{clouds:.22,haze:.18,wind:2,rain:0,time:22,temp:10}
 };
+
+function addRunwayVisuals(group,{width,length}){
+ const half=length/2,edge=width/2,threshold=half-14;
+ const paint=[];
+ const stripe=(x,z,w,l)=>paint.push([x,z,w,l]);
+ for(const side of [-1,1])stripe(side*(edge-2),0,.85,length-65);
+ const centerlineExtent=Math.floor((half-320)/90)*90;
+ for(let z=-centerlineExtent;z<=centerlineExtent;z+=90)stripe(0,z,1.15,38);
+ const digitStrokes=[[0,5.9,5.3,1.25],[2.15,3.1,1.25,5.1],[2.15,-3.1,1.25,5.1],[0,-5.9,5.3,1.25],[-2.15,-3.1,1.25,5.1],[-2.15,3.1,1.25,5.1],[0,0,5.3,1.25]];
+ const digits={1:[1,2],3:[0,1,2,3,6],6:[0,2,3,4,5,6],8:[0,1,2,3,4,5,6]};
+ for(const end of [-1,1]){
+  for(const side of [-1,1]){
+   for(let n=0;n<6;n++)stripe(side*(3.9+n*3.95),end*(half-56),1.65,38);
+   stripe(side*11,end*(half-365),5.6,39);
+   for(const distance of [188,484,611])for(const x of [8.5,11.5])stripe(side*x,end*(half-distance),1.35,19);
+  }
+  const designator=end===1?'18':'36';
+  for(let digit=0;digit<2;digit++)for(const segment of digits[designator[digit]]){
+   const [x,y,w,h]=digitStrokes[segment];stripe(end*(x+(digit-.5)*8),end*(half-124-y),w,h);
+  }
+ }
+ const paintMaterial=new THREE.MeshStandardMaterial({color:0xece6d6,roughness:.89,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-3});
+ const markings=new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1),paintMaterial,paint.length);
+ markings.name='Solana runway paint · 18 / 36';
+ const marker=new THREE.Object3D();marker.rotation.x=-Math.PI/2;
+ paint.forEach(([x,z,w,l],index)=>{marker.position.set(x,.19,z);marker.scale.set(w,l,1);marker.updateMatrix();markings.setMatrixAt(index,marker.matrix);});
+ group.add(markings);
+
+ const positions=[],colors=[],properties=[];
+ const white=new THREE.Color(0xfff3dc),coolWhite=new THREE.Color(0xf1f8ff),green=new THREE.Color(0x70ff9e);
+ const light=(x,y,z,tint,brightness,kind=0,side=0)=>{
+  positions.push(x,y,z);colors.push(tint.r,tint.g,tint.b);properties.push(brightness,kind,side);
+ };
+ for(let z=-half+32;z<=half-32;z+=48)for(const side of [-1,1])light(side*(edge+1.6),.55,z,white,.92);
+ for(let z=-half+60;z<=half-60;z+=30)light(0,.25,z,coolWhite,.72);
+ for(const end of [-1,1]){
+  for(let n=-6;n<=6;n++)light(n*(edge-2)/6,.48,end*threshold,green,1.16,1,end);
+  for(let distance=64;distance<=640;distance+=64){
+   for(const x of distance===320?[-18,-12,-6,0,6,12,18]:[-2.8,0,2.8])light(x,1.0,end*(half+distance),white,1.2,2,end);
+  }
+ }
+ const lightGeometry=new THREE.BufferGeometry();
+ lightGeometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
+ lightGeometry.setAttribute('lightColor',new THREE.Float32BufferAttribute(colors,3));
+ lightGeometry.setAttribute('lightStyle',new THREE.Float32BufferAttribute(properties,3));
+ const lightMaterial=new THREE.ShaderMaterial({transparent:true,depthWrite:false,toneMapped:false,
+  uniforms:{daylight:{value:1},haze:{value:.22},observerZ:{value:0},runwayHalf:{value:half},endTint:{value:new THREE.Color(0xff5846)}},
+  vertexShader:`attribute vec3 lightColor,lightStyle;
+uniform float daylight,haze,observerZ,runwayHalf;
+uniform vec3 endTint;
+varying vec3 lampTint;
+varying float lampOpacity;
+void main(){
+ vec4 eye=modelViewMatrix*vec4(position,1.);
+ float distanceToLamp=max(1.,length(eye.xyz));
+ float brightness=lightStyle.x,kind=lightStyle.y,side=lightStyle.z;
+ float dusk=1.-daylight;
+ lampTint=lightColor;
+ lampOpacity=mix(.53,1.,dusk)*brightness*exp(-distanceToLamp*(.000025+haze*.00011));
+ if(kind>1.5)lampOpacity*=smoothstep(-35.,40.,side*observerZ-runwayHalf);
+ else if(kind>.5)lampTint=mix(endTint,lightColor,smoothstep(-2.,2.,side*(observerZ-position.z)));
+ gl_PointSize=clamp((mix(3.,5.,dusk)+1200./distanceToLamp)*sqrt(brightness),2.5,14.);
+ gl_Position=projectionMatrix*eye;
+}`,
+  fragmentShader:`varying vec3 lampTint;
+varying float lampOpacity;
+void main(){
+ float radius=length(gl_PointCoord-.5)*2.;
+ float core=1.-smoothstep(.13,.4,radius);
+ float halo=(1.-smoothstep(.15,1.,radius))*.3;
+ float opacity=(core+halo)*lampOpacity;
+ if(opacity<.005)discard;
+ gl_FragColor=vec4(lampTint,clamp(opacity,0.,1.));
+ #include <colorspace_fragment>
+}`});
+ const lights=new THREE.Points(lightGeometry,lightMaterial);
+ lights.name='Solana runway and approach lights';group.add(lights);
+ return {lightMaterial,paintMaterial};
+}
+
 export function createWorld(scene,data){
  const group=new THREE.Group();scene.add(group);
  const env={time:18.7,clouds:.65,haze:.22,wind:3,rain:0,temp:18};let target={...env},weather='Golden Sunset',quality='balanced';
@@ -34,12 +114,11 @@ void main(){vec3 p=vWorld+origin;vec2 q=p.xz;float n=fbm(vec3(q*.003,time*.07));
  function populate(i){const rng=random(i.seed+60),count=110,geo=new THREE.BoxGeometry(1,1,1);const m=new THREE.InstancedMesh(geo,new THREE.MeshStandardMaterial({color:0x878681,roughness:.9}),count);const dummy=new THREE.Object3D();const lights=[];for(let n=0;n<count;n++){const a=rng()*Math.PI*2,r=.72+rng()*.14,x=i.x+Math.cos(a)*i.rx*r,z=i.z+Math.sin(a)*i.rz*r,y=data.terrainHeight(x,z);const size=10+rng()*24;dummy.position.set(x,y+size*.5,z);dummy.scale.set(size,size*(.4+rng()),size);dummy.updateMatrix();m.setMatrixAt(n,dummy.matrix);lights.push(x,y+size+3,z);}const lightGeo=new THREE.BufferGeometry();lightGeo.setAttribute('position',new THREE.Float32BufferAttribute(lights,3));const points=new THREE.Points(lightGeo,new THREE.PointsMaterial({color:0xffc67b,size:24,sizeAttenuation:true,transparent:true,opacity:.6,depthWrite:false}));const g=new THREE.Group();g.add(m,points);g.userData.lights=points;return g;}
  function rebuild(x,z){data.islands=data.candidates(x,z);const keys=new Set(data.islands.map(i=>i.seed+','+i.x));for(const [key,obj]of terrainMeshes)if(!keys.has(key)){group.remove(obj);obj.traverse(o=>{if(o.geometry)o.geometry.dispose();});terrainMeshes.delete(key);}for(const i of data.islands){const key=i.seed+','+i.x;if(terrainMeshes.has(key))continue;const lod=new THREE.LOD();lod.addLevel(terrain(i,80),0);lod.addLevel(terrain(i,40),45000);lod.addLevel(terrain(i,20),90000);const g=new THREE.Group();g.add(lod,populate(i));group.add(g);terrainMeshes.set(key,g);}}
  rebuild(-22000,-33000);
- const runwayGroup=new THREE.Group();runwayGroup.position.set(0,data.airport.y+.5,0);runwayGroup.rotation.y=-data.airport.heading*Math.PI/180;group.add(runwayGroup);
+ const runwayGroup=new THREE.Group();runwayGroup.position.set(data.airport.x,data.airport.y+.5,data.airport.z);runwayGroup.rotation.y=-data.airport.heading*Math.PI/180;group.add(runwayGroup);
  function box(w,h,d,x,y,z,color){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshStandardMaterial({color,roughness:.85}));m.position.set(x,y,z);runwayGroup.add(m);return m;}
- box(60,.3,2800,0,0,0,0x4b4c51);box(450,.25,700,330,-.1,400,0x77756d);box(22,.25,2600,150,.05,0,0x6b6b68);box(170,16,40,390,8,650,0xbcb2a1);box(25,37,25,250,18,600,0x919590);
- for(let z=-1250;z<=1250;z+=90)box(2,.1,40,0,.3,z,0xf4ebe0);
- for(const z of [-1290,1290])for(let x=-20;x<=20;x+=8)box(4,.1,45,x,.3,z,0xfff1d8);
- const lampGeo=new THREE.SphereGeometry(1.7,5,4),lampMat=new THREE.MeshBasicMaterial({color:0xffdb9e});const lamps=new THREE.InstancedMesh(lampGeo,lampMat,112);const transform=new THREE.Object3D();let li=0;for(let z=-1375;z<=1375;z+=50)for(const x of [-33,33]){transform.position.set(x,1.5,z);transform.updateMatrix();lamps.setMatrixAt(li++,transform.matrix);}runwayGroup.add(lamps);
+ box(data.airport.width,.3,data.airport.length,0,0,0,0x4b4c51);box(450,.25,700,330,-.1,400,0x77756d);box(22,.25,2600,150,.05,0,0x6b6b68);box(170,16,40,390,8,650,0xbcb2a1);box(25,37,25,250,18,600,0x919590);
+ const {lightMaterial:runwayLights,paintMaterial:runwayPaint}=addRunwayVisuals(runwayGroup,data.airport);
+ const runwaySin=Math.sin(runwayGroup.rotation.y),runwayCos=Math.cos(runwayGroup.rotation.y);
  // Bounded ray-marched cloud volumes occupy real world coordinates.
  const cloudVertex=`varying vec3 vWorld;varying vec3 vCenter;void main(){vec4 w=modelMatrix*vec4(position,1.);vWorld=w.xyz;vCenter=(modelMatrix*vec4(0.,0.,0.,1.)).xyz;gl_Position=projectionMatrix*viewMatrix*w;}`;
  const cloudFragment=`varying vec3 vWorld,vCenter;uniform vec3 size,sun;uniform float time,day,opacity,steps;${glslNoise}
@@ -53,6 +132,8 @@ void main(){vec3 ro=(cameraPosition-vCenter)/size,rd=normalize(vWorld-cameraPosi
  const rainGeo=new THREE.BufferGeometry(),rainPos=new Float32Array(500*3);for(let i=0;i<rainPos.length;i+=3){rainPos[i]=(rng()-.5)*80;rainPos[i+1]=(rng()-.5)*50;rainPos[i+2]=(rng()-.5)*80;}rainGeo.setAttribute('position',new THREE.BufferAttribute(rainPos,3));const rain=new THREE.Points(rainGeo,new THREE.PointsMaterial({color:0xbfcada,size:.09,transparent:true,opacity:.35}));scene.add(rain);rain.visible=false;
  let tileKey='',lastFlightTime=0;
  function update(dt,elapsed,state,camera,origin){const clockDelta=state.flightTime-lastFlightTime;lastFlightTime=state.flightTime;if(clockDelta>0&&clockDelta<2)target.time=(target.time+clockDelta/3600)%24;const blend=Math.min(dt*.25,1);for(const k of Object.keys(env))if(k!=='time')env[k]+=(target[k]-env[k])*blend;env.time=(env.time+(((target.time-env.time+36)%24)-12)*blend+24)%24;const hour=env.time;const elevation=Math.sin((hour-6)/12.95*Math.PI)*.75;sunDir.set(.24,elevation,.97).normalize();const day=THREE.MathUtils.smoothstep(elevation,-.13,.04);sky.position.copy(camera.position);skyMat.uniforms.day.value=day;skyMat.uniforms.haze.value=env.haze;skyMat.uniforms.time.value=elapsed;ocean.position.set(camera.position.x,-1,camera.position.z);oceanMat.uniforms.origin.value.copy(origin);oceanMat.uniforms.time.value=elapsed;oceanMat.uniforms.day.value=day;oceanMat.uniforms.haze.value=env.haze;oceanMat.uniforms.wind.value=env.wind;group.position.copy(origin).multiplyScalar(-1);sun.position.copy(new THREE.Vector3(state.position.x,state.position.y,state.position.z).sub(origin)).addScaledVector(sunDir,95);sun.target.position.set(state.position.x-origin.x,state.position.y,state.position.z-origin.z);sun.intensity=(.35+day*3.2)*(1-env.haze*.35);sun.color.setRGB(1,.68+Math.max(elevation,0)*.25,.43+Math.max(elevation,0)*.45);ambient.intensity=.32+day*1.8;scene.environmentIntensity=.1+day*.8;scene.fog.color.setRGB(.18+day*.48,.19+day*.32,.28+day*.26);scene.fog.density=.000005+env.haze*.000015;
+ runwayLights.uniforms.daylight.value=day;runwayLights.uniforms.haze.value=env.haze;
+ runwayLights.uniforms.observerZ.value=runwaySin*(camera.position.x+origin.x-data.airport.x)+runwayCos*(camera.position.z+origin.z-data.airport.z);
  for(let n=0;n<clouds.length;n++){const c=clouds[n];c.visible=n<Math.round(env.clouds*(quality==='performance'?8:quality==='cinematic'?36:16));c.material.uniforms.day.value=day;c.material.uniforms.time.value=elapsed;c.material.uniforms.opacity.value=.87+env.haze*.08;c.position.x=c.userData.base.x+elapsed*env.wind*.45-Math.round((c.userData.base.x+elapsed*env.wind*.45-state.position.x)/180000)*180000;c.position.z=c.userData.base.z-Math.round((c.userData.base.z-state.position.z)/180000)*180000;}
  for(let n=0;n<sprites.length;n++){const s=sprites[n];s.visible=n<env.clouds*sprites.length;s.material.opacity=.22;s.material.color.setRGB(.45+day*.55,.49+day*.36,.64+day*.14);s.position.x=s.userData.base.x+elapsed*env.wind*.45-Math.round((s.userData.base.x+elapsed*env.wind*.45-state.position.x)/180000)*180000;s.position.z=s.userData.base.z-Math.round((s.userData.base.z-state.position.z)/180000)*180000;}
  const key=Math.round(state.position.x/80000)+','+Math.round(state.position.z/80000);if(key!==tileKey){tileKey=key;rebuild(state.position.x,state.position.z);}
@@ -60,10 +141,10 @@ void main(){vec3 ro=(cameraPosition-vCenter)/size,rd=normalize(vWorld-cameraPosi
  rain.visible=env.rain>.1;rain.position.copy(camera.position);if(rain.visible){for(let n=1;n<rainPos.length;n+=3){rainPos[n]-=dt*18;if(rainPos[n]<-25)rainPos[n]=25;}rainGeo.attributes.position.needsUpdate=true;}
  let inside=0;for(const c of clouds){if(!c.visible)continue;const p=state.position,sz=c.userData.size,d=Math.hypot((p.x-c.position.x)/sz.x,(p.y-c.position.y)/sz.y,(p.z-c.position.z)/sz.z);inside=Math.max(inside,Math.max(0,1-d));}scene.fog.density+=inside*.001;
  return {day,cloudDensity:inside,wind:env.wind,rain:env.rain,time:env.time,weather};}
- function setWeather(name){if(!WEATHER[name])return;weather=name;target={...WEATHER[name]};}
+ function setWeather(name,{immediate=false,time}={}){if(!Object.hasOwn(WEATHER,name))return;weather=name;target={...WEATHER[name]};if(Number.isFinite(time))target.time=((time%24)+24)%24;if(immediate)Object.assign(env,target);}
  function setTime(time){target.time=time;}
  function setQuality(name){quality=name;const low=name==='performance';for(const c of clouds)c.material.uniforms.steps.value=low?8:name==='cinematic'?24:12;for(let n=0;n<clouds.length;n++)clouds[n].material.uniforms.opacity.value=low?.65:.85;sun.castShadow=!low;}
- return {group,env,sun,clouds,update,setWeather,setTime,setQuality,get weather(){return weather;},dispose(){group.traverse(o=>{o.geometry?.dispose();});}};
+ return {group,env,sun,clouds,update,setWeather,setTime,setQuality,get weather(){return weather;},dispose(){group.traverse(o=>{o.geometry?.dispose();});runwayLights.dispose();runwayPaint.dispose();}};
 }
 
 

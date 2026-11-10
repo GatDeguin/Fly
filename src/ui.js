@@ -1,3 +1,5 @@
+import { LANDING_CHALLENGES } from './academy.js';
+
 const ICONS = {
   plane: '<path class="brand-mark" d="m21 2-3.1.5-5.6 6-7.5-3.6-2.2 1.8 6.8 5.2-4.4 4.8-3.2-.8-1.4 1.4 4 2 2 4 1.4-1.4-.8-3.2 4.8-4.4 5.2 6.8 1.8-2.2-3.6-7.5 6-5.6z"/>',
   world: '<circle cx="12" cy="12" r="10"/><ellipse cx="12" cy="12" rx="4.8" ry="10"/><path d="M2 12h20M4 6.5h16M4 17.5h16"/>',
@@ -17,6 +19,7 @@ const ICONS = {
   hud: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
   motion: '<rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 19h4M2 9l2 3-2 3m20-6-2 3 2 3"/>',
   brake: '<circle cx="12" cy="12" r="6"/><path d="M4 5a10 10 0 0 0 0 14M20 5a10 10 0 0 1 0 14M9 8h3a2 2 0 0 1 0 4H9h4a2 2 0 0 1 0 4H9Z"/>',
+  runway: '<path d="m8 3-4 18h16L16 3Zm4 2v2m0 3v2m0 4v2"/>',
 };
 const icon = (name, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ICONS.plane}</svg>`;
 const CAMERAS = ['Pilot', 'Copilot', 'External', 'Chase', 'Side', 'Front', 'Left wing', 'Right wing', 'Top', 'Free', 'Orbit', 'Cinematic'];
@@ -60,6 +63,20 @@ const SPANISH = {
   'All systems normal. Enjoy the view.':'Sistemas normales. Disfrutá la vista.','On the ground. Shift increases power; Space brakes.':'En tierra. Shift aumenta potencia; Espacio frena.','Low airspeed. Gently add power.':'Velocidad baja. Aumentá suavemente la potencia.','Autopilot guiding your journey.':'El piloto automático guía tu recorrido.','Manual flight. A gentle hand on the controls.':'Vuelo manual. Manos suaves en los controles.',
 };
 SPANISH['Gentle phone vibration']='Vibración suave del móvil';
+Object.assign(SPANISH, {
+  'Landing academy':'Academia de aterrizaje','Landing challenges':'Desafíos de aterrizaje','Landing guidance':'Guía de aterrizaje','Landing debrief':'Resumen del aterrizaje','Exit landing challenge':'Salir del desafío','Challenge complete':'Desafío completado','Another try?':'¿Otro intento?','Retry':'Reintentar','Resume free flight':'Retomar vuelo libre','Personal best':'Récord personal','Best':'Mejor','Unscored':'Sin puntaje','Target':'Objetivo',
+  'To aim · NM':'A objetivo · NM','IAS · KT':'IAS · KT','V/S · FPM':'V/S · PPM','Line · M':'Eje · M','Glide · FT':'Senda · PIES','Touchdown · FPM':'Toma · PPM','Offset · M':'Desvío · M','Heading error · °':'Error rumbo · °','From threshold · M':'Desde umbral · M',
+  'Final approach':'Aproximación final','Short final':'Final corta','Runway passed':'Pista superada','Line up with the runway':'Alineate con la pista','Lower landing gear':'Bajá el tren de aterrizaje','Ease off power':'Reducí un poco la potencia','Add a little power':'Sumá un poco de potencia','Above glide path':'Por encima de la senda','Below glide path':'Por debajo de la senda','Flare gently':'Levantá suavemente la nariz','Stable approach':'Aproximación estable',
+  'Gold':'Oro','Silver':'Plata','Bronze':'Bronce','Runway arrival recorded.':'Llegada a pista registrada.','The runway was missed.':'No llegaste a aterrizar en la pista.','Touchdown was outside the runway.':'La toma fue fuera de pista.','The touchdown was too firm.':'La toma fue demasiado fuerte.','Lower the landing gear before touchdown.':'Bajá el tren antes de tocar pista.','Align with the runway before touchdown.':'Alineate con la pista antes de tocar.','Try to settle on the runway.':'Intentá hacer una toma suave en la pista.',
+});
+const ACADEMY_ES = {
+  'first-landing':['Primer aterrizaje','Practicá una aproximación estable con buena visibilidad.'],
+  'night-landing':['Aterrizaje nocturno','Seguí las luces de pista en una llegada nocturna.'],
+  'storm-landing':['Aterrizaje en tormenta','Mantené la alineación en condiciones de lluvia y viento.'],
+};
+const ACADEMY_REASONS = {
+  missed:'The runway was missed.', runway:'Touchdown was outside the runway.', hard:'The touchdown was too firm.', gear:'Lower the landing gear before touchdown.', alignment:'Align with the runway before touchdown.',
+};
 const n = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const fmt = (value) => Math.round(n(value)).toLocaleString('en-US');
 
@@ -67,6 +84,7 @@ export function createUI(callbacks = {}) {
   const act = typeof callbacks === 'function' ? callbacks : callbacks.onAction || (() => {});
   let activePanel = null, activeCamera = 'External', paused = false, muted = false, photoMode = false, tutorialStep = -1;
   let toastTimer, hintTimer, bindingCapture = null, lastState = {}, lastAP = {}, lastMeta = {}, language = 'en';
+  let academyAnnouncement = '';
   let touchPointer = null, touchOrigin = { x: 0, y: 0 };
   const listeners = [];
   const root = document.createElement('div'); root.id = 'hud';
@@ -82,6 +100,18 @@ export function createUI(callbacks = {}) {
     <div class="utility-controls" aria-label="Quick controls"><button data-action="pause" title="Pause (Esc)" aria-label="Pause">${icon('pause')}</button><button data-action="mute" title="Sound" aria-label="Mute sound" aria-pressed="false">${icon('sound')}</button><button data-action="photoPanel" title="Photo mode" aria-label="Open photo controls">${icon('camera')}</button><button data-action="fullscreen" title="Fullscreen" aria-label="Toggle fullscreen">${icon('fullscreen')}</button><button data-action="hud" title="Show or hide interface (H)" aria-label="Show or hide interface">${icon('hud')}</button><button data-action="tutorial" title="Learn to fly" aria-label="Start flight tutorial">${icon('help')}</button></div>
     <div class="control-hint hud-element"><span><kbd>W S</kbd> pitch</span><span><kbd>A D</kbd> bank</span><span><kbd>Shift Ctrl</kbd> power</span><span><kbd>P</kbd> autopilot</span><span><kbd>V</kbd> view</span><button aria-label="Dismiss controls hint" data-action="dismissHint">×</button></div>
     <div class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+    <section id="academy-hud" class="academy-card hud-element" hidden aria-label="Landing guidance">
+      <header class="academy-header">${icon('runway')}<div><span class="academy-kicker">Landing academy</span><h2 data-academy-text="activeTitle"></h2></div><button class="academy-exit" data-action="academyExit" aria-label="Exit landing challenge" title="Exit landing challenge">${icon('close')}</button></header>
+      <div class="academy-readouts"><div><span>To aim · NM</span><strong data-academy-text="distance">—</strong></div><div><span>IAS · KT</span><strong data-academy-text="ias">—</strong></div><div><span>V/S · FPM</span><strong data-academy-text="descent">—</strong></div><div><span>Line · M</span><strong data-academy-text="line">—</strong></div><div><span>Glide · FT</span><strong data-academy-text="glide">—</strong></div></div>
+      <p class="academy-cue"><span data-academy-text="cue"></span><small data-academy-text="target"></small></p>
+    </section>
+    <section id="academy-result" class="academy-card academy-result hud-element" hidden aria-label="Landing debrief">
+      <header class="academy-header">${icon('runway')}<div><span class="academy-kicker" data-academy-text="resultTitle"></span><h2 data-academy-text="outcome"></h2></div><span class="academy-score" data-academy-text="score"></span></header>
+      <p class="academy-summary"><span data-academy-text="reason"></span><span class="academy-record" data-academy-text="record" hidden></span></p>
+      <div class="academy-readouts academy-result-metrics"><div><span>Touchdown · FPM</span><strong data-academy-text="touchdown">—</strong></div><div><span>Offset · M</span><strong data-academy-text="offset">—</strong></div><div><span>Heading error · °</span><strong data-academy-text="heading">—</strong></div><div><span>From threshold · M</span><strong data-academy-text="threshold">—</strong></div></div>
+      <div class="button-row"><button class="primary-button" data-action="academyRetry">Retry</button><button class="soft-button" data-action="academyExit">Resume free flight</button></div>
+    </section>
+    <span id="academy-status" class="sr-only hud-element" role="status" aria-live="polite" aria-atomic="true"></span>
     <div class="touch-controls hud-element"><div class="touch-joystick" role="slider" aria-label="Flight joystick, drag to pitch and roll" tabindex="0" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0"><div class="joystick-knob"></div><span class="touch-label">PITCH · ROLL</span></div><div class="touch-shortcuts"><button data-action="motion" aria-label="Enable phone tilt controls" title="Phone tilt">${icon('motion')}</button><button data-camera="next" aria-label="Next camera">${icon('camera')}</button><button data-brake aria-label="Hold to brake" title="Hold to brake">${icon('brake')}</button></div><label class="touch-throttle"><input type="range" min="0" max="100" value="70" data-input="throttle" aria-label="Throttle"><span data-live="throttleTouch">70%</span></label></div>
     <section class="pause-screen" hidden aria-label="Flight paused" role="dialog" aria-modal="true"><div class="pause-card">${icon('plane','pause-aircraft')}<h2>A moment to breathe.</h2><p>Your journey is waiting.<br>Take your time.</p><button class="primary-button" data-action="unpause">Continue flying</button><div class="button-row"><button class="soft-button" data-action="save">Save flight</button><button class="soft-button" data-action="resume">Load saved flight</button></div><div class="button-row"><button class="soft-button" data-reset="cruise">Fresh journey</button><button class="soft-button" data-action="pauseSettings">Settings</button></div><p class="panel-note" style="margin:20px 0 0">Esc to return to the sky</p></div></section>
     <section class="tutorial-card" hidden aria-label="Flight tutorial"><span class="tutorial-step"></span><div class="panel-heading"><h3></h3><button class="close-button" data-action="closeTutorial" aria-label="Close tutorial">${icon('close')}</button></div><p></p><div class="button-row"><button class="soft-button" data-action="tutorialBack">Back</button><button class="primary-button" data-action="tutorialNext">Next</button></div></section>
@@ -104,6 +134,7 @@ export function createUI(callbacks = {}) {
     root.appendChild(panel); return panel;
   };
   addPanel('flight', 'The art of flying', 'A gentle hand. A wide-open sky.', `
+    <div class="academy-chooser"><span class="section-label">Landing challenges</span><div class="option-list">${LANDING_CHALLENGES.map((challenge, index) => `<button class="option-button academy-choice" data-academy-start="${challenge.id}"><span class="academy-choice-number">0${index+1}</span><span class="academy-choice-copy"><strong data-academy-title>${challenge.title}</strong><small data-academy-description>${challenge.description}</small></span><span class="academy-best" data-academy-best hidden></span>${icon('next')}</button>`).join('')}</div></div>
     ${select('Flight mode','mode',[['zen','Zen Flight'],['standard','Standard Flight'],['simulation','Simulation Flight']],'zen')}
     <div class="live-flight"><div><strong data-live="ias">—</strong><span>IAS · KTS</span></div><div><strong data-live="heading">—</strong><span>HDG · DEG</span></div><div><strong data-live="vs">—</strong><span>VS · FT/MIN</span></div></div>
     ${range('Engine power','throttle',70,0,100)}
@@ -141,9 +172,63 @@ export function createUI(callbacks = {}) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   while (walker.nextNode()) {
     const node = walker.currentNode;
-    if (node.textContent.trim() && !node.parentElement.closest('[data-live],.toast,.tutorial-card,.camera-name')) staticText.push([node,node.textContent]);
+    if (node.textContent.trim() && !node.parentElement.closest('[data-live],.toast,.tutorial-card,.camera-name,[data-academy-title],[data-academy-description]')) staticText.push([node,node.textContent]);
   }
   const tr = (text) => language === 'es' ? SPANISH[text] || text : text;
+  const academyChoices = $$('[data-academy-start]');
+  const academyNodes = Object.fromEntries($$('[data-academy-text]').map(node=>[node.dataset.academyText,node]));
+  const academyHud = $('#academy-hud'), academyResult = $('#academy-result'), academyStatus = $('#academy-status');
+  const writeText = (node,value) => { if(node.textContent!==value)node.textContent=value; };
+  const challengeCopy = challenge => language==='es' && ACADEMY_ES[challenge.id] ? ACADEMY_ES[challenge.id] : [challenge.title,challenge.description];
+  const updateAcademy = (academy, state, ias) => {
+    const challenge = LANDING_CHALLENGES.find(item=>item.id===academy?.challengeId);
+    const guidance = challenge && academy.guidance;
+    const result = challenge && academy.result;
+    const active = Boolean(guidance && !result);
+    academyHud.hidden = !active;
+    academyResult.hidden = !result;
+    root.classList.toggle('academy-open', active || Boolean(result));
+    academyChoices.forEach(button=>{
+      const item=LANDING_CHALLENGES.find(entry=>entry.id===button.dataset.academyStart);
+      const best=academy?.bests?.[item.id];
+      const [title,description]=challengeCopy(item);
+      writeText(button.querySelector('[data-academy-title]'),title);
+      writeText(button.querySelector('[data-academy-description]'),description);
+      const bestNode=button.querySelector('[data-academy-best]');
+      bestNode.hidden=!Number.isFinite(best);
+      if(!bestNode.hidden)writeText(bestNode,`${tr('Best')} ${Math.round(best)}`);
+      button.classList.toggle('selected',item.id===challenge?.id);
+    });
+    const display=(key,value)=>writeText(academyNodes[key],String(value));
+    const format=(value,precision=0)=>Number.isFinite(value)?Number(value).toLocaleString(language==='es'?'es-AR':'en-US',{minimumFractionDigits:precision,maximumFractionDigits:precision}):'—';
+    const signed=value=>Number.isFinite(value)?`${Math.round(value)>0?'+':''}${format(Math.abs(value)<.5?0:value)}`:'—';
+    const magnitude=value=>Number.isFinite(value)?format(Math.abs(value)):'—';
+    let announcement='';
+    if(active){
+      const [title]=challengeCopy(challenge);
+      const phase=guidance.passedRunway?'Runway passed':guidance.distanceNm<.35?'Short final':'Final approach';
+      const lateral=guidance.lateralMeters;
+      const cue=guidance.passedRunway?phase:n(state.gear)<.9?'Lower landing gear':Math.abs(lateral)>30||Math.abs(guidance.headingError)>9?'Line up with the runway':guidance.speedDelta>12?'Ease off power':guidance.speedDelta< -12?'Add a little power':guidance.glideFeet>120?'Above glide path':guidance.glideFeet< -90?'Below glide path':guidance.distanceNm<.15&&n(state.agl,Infinity)<11?'Flare gently':'Stable approach';
+      academyHud.dataset.cue=cue==='Stable approach'?'steady':'attention';
+      display('activeTitle',title);
+      display('distance',format(guidance.distanceNm,1));display('ias',format(ias));display('descent',signed(state.verticalSpeed));
+      display('line',Number.isFinite(lateral)?`${magnitude(lateral)}${Math.round(Math.abs(lateral))?` ${lateral>0?(language==='es'?'D':'R'):(language==='es'?'I':'L')}`:''}`:'—');
+      display('glide',signed(guidance.glideFeet));display('cue',tr(cue));display('target',`${tr('Target')} ${format(challenge.targetSpeed)} kt`);
+      announcement=`${title} · ${tr(phase)}`;
+    }else if(result){
+      const [title]=challengeCopy(challenge);
+      const medal=String(result.medal||'').toLowerCase();
+      const status=tr(result.passed?'Challenge complete':'Another try?');
+      const medalLabel={gold:'Gold',silver:'Silver',bronze:'Bronze'}[medal];
+      const reason=tr(result.passed?'Runway arrival recorded.':ACADEMY_REASONS[result.reason]||'Try to settle on the runway.');
+      academyResult.dataset.medal=medalLabel?medal:'';
+      display('resultTitle',title);display('outcome',medalLabel?`${status} · ${tr(medalLabel)}`:status);display('score',Number.isFinite(result.score)?`${format(result.score)} / 100`:tr('Unscored'));
+      display('reason',reason);display('record',tr('Personal best'));academyNodes.record.hidden=!result.personalBest;
+      display('touchdown',magnitude(result.rate));display('offset',magnitude(result.lateralMeters));display('heading',magnitude(result.headingError));display('threshold',format(result.touchdownMeters));
+      announcement=`${title} · ${status}. ${reason} ${academyNodes.score.textContent}${result.personalBest?` · ${tr('Personal best')}`:''}`;
+    }
+    if(academyAnnouncement!==announcement){academyAnnouncement=announcement;writeText(academyStatus,announcement);}
+  };
 
   function toast(message) {
     clearTimeout(toastTimer); $('.toast').textContent = String(message); $('.toast').classList.add('visible');
@@ -251,6 +336,7 @@ export function createUI(callbacks = {}) {
     if (meta.paused !== undefined && Boolean(meta.paused) !== paused) setPaused(meta.paused);
     updateInput('throttle',n(state.throttle,.7)*100);updateInput('autopilot',Boolean(ap.enabled));updateInput('apHeading',ap.heading==null?undefined:Math.round(ap.heading)%360);updateInput('apAltitude',ap.altitude==null?undefined:Math.round(ap.altitude));updateInput('apSpeed',ap.speed==null?undefined:Math.round(ap.speed));updateInput('apVS',ap.vs ?? ap.verticalSpeed);updateInput('verticalMode',ap.verticalMode);updateInput('routeFollow',ap.routeFollow ?? ap.followRoute ?? ap.route);
     if(meta.language && language!==meta.language){language=meta.language;applyLanguage(false);}
+    updateAcademy(meta.academy,state,ias);
     updateInput('time',time);['mode','quality','fov','exposure','sensitivity','deadzone','language'].forEach(key => { if(meta[key] !== undefined) updateInput(key,meta[key]); });
     ['ambient','haptics','invertMotionY','invertMotionX','invertMotionZ','reducedMotion','cameraShake','photoMode'].forEach(key => { if(meta[key] !== undefined) updateInput(key,meta[key]); });
     if(meta.hapticIntensity !== undefined) updateInput('hapticIntensity',n(meta.hapticIntensity)*100);
@@ -271,6 +357,7 @@ export function createUI(callbacks = {}) {
   on(root,'click',event => {
     const button=event.target.closest('button');if(!button)return;
     if(button.dataset.panel) { togglePanel(button.dataset.panel); return; }
+    if(button.dataset.academyStart) { togglePanel(null,false); emit('academyStart',button.dataset.academyStart); return; }
     if(button.dataset.camera) { emit('camera',button.dataset.camera);return; }
     if(button.dataset.route) { emit('route',button.dataset.route);toast(`${button.dataset.route}. A beautiful way to go.`);return; }
     if(button.dataset.weather) { emit('weather',button.dataset.weather);toast(`Welcoming ${button.dataset.weather.toLowerCase()}.`);return; }
@@ -278,6 +365,7 @@ export function createUI(callbacks = {}) {
     if(button.dataset.rebind) { if(bindingCapture) { bindingCapture.button.classList.remove('waiting');bindingCapture.button.textContent=bindingCapture.original; }bindingCapture={action:button.dataset.rebind,button,original:button.textContent};button.classList.add('waiting');button.textContent='Press key';return; }
     const action=button.dataset.action;if(!action)return;
     switch(action) {
+      case 'academyRetry':case 'academyExit':togglePanel(null,false);emit(action);break;
       case 'closePanel':togglePanel(null);break;
       case 'dismissHint':$('.control-hint').classList.add('hint-faded');break;
       case 'pause':emit('pause',!paused);break;
@@ -317,6 +405,10 @@ export function createUI(callbacks = {}) {
     const headings=es?['El arte de volar','Lugares hermosos','Un cielo diferente','Otra perspectiva','Sentite como en casa']:['The art of flying','Beautiful places','A different kind of sky','A new perspective','Make yourself at home'];
     ['flight','world','weather','camera','settings'].forEach((name,index)=>{$(`#title-${name}`).textContent=headings[index];});
     if(tutorialStep>=0)tutorial(tutorialStep);
+    academyHud.setAttribute('aria-label',tr('Landing guidance'));
+    academyResult.setAttribute('aria-label',tr('Landing debrief'));
+    const exit=academyHud.querySelector('[data-action="academyExit"]');
+    exit.setAttribute('aria-label',tr('Exit landing challenge'));exit.title=tr('Exit landing challenge');
     if(notify)toast(es?'Idioma: español. Buen vuelo.':'Language: English. Have a beautiful flight.');
   }
   on(window,'keydown',event => {

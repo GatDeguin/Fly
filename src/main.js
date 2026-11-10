@@ -8,6 +8,7 @@ import {createAudio} from './audio.js';
 import {createMotion} from './motion.js';
 import {createFlightHaptics} from './haptics.js';
 import {createPairingURL,renderPairingQR} from './qr-code.js';
+import {LANDING_CHALLENGES,getApproachGuidance,scoreLanding} from './academy.js';
 
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 const cameras=['Pilot','Copilot','External','Chase','Side','Front','Left wing','Right wing','Top','Free','Orbit','Cinematic'];
@@ -15,7 +16,13 @@ const settings={quality:'auto',sensitivity:1,deadzone:.08,volume:.35,muted:false
 const keyBindings={pitchDown:'KeyW',pitchUp:'KeyS',rollLeft:'KeyA',rollRight:'KeyD',yawLeft:'KeyQ',yawRight:'KeyE',throttleUp:'ShiftLeft',throttleDown:'ControlLeft',gear:'KeyG',flaps:'KeyF',autopilot:'KeyP',camera:'KeyV',cinematic:'KeyC'};
 const data=createWorldData(42),sim=createSimulation(data),audio=createAudio();sim.setRoute(data.routes['Golden Islands']);sim.autopilot.route=false;sim.route.index=1;
 const progress={visited:[],journeys:[],photos:0,tutorialStep:0};
-function savePreferences(){try{localStorage.setItem('skyjourney-preferences-v1',JSON.stringify({settings,keyBindings,progress,mode:sim.settings.mode}));}catch{}}
+const academyStorage='skyjourney-academy-v1';
+const academy={challenge:null,result:null,returnFlight:null,bests:{}};
+try {
+ const saved=JSON.parse(localStorage.getItem(academyStorage));
+ for(const {id} of LANDING_CHALLENGES){const score=saved?.[id];if(Number.isInteger(score)&&score>=0&&score<=100)academy.bests[id]=score;}
+}catch{}
+function savePreferences(){try{localStorage.setItem('skyjourney-preferences-v1',JSON.stringify({settings,keyBindings,progress,mode:academy.returnFlight?.simulation.settings.mode??sim.settings.mode}));}catch{}}
 function importPreferences(saved){if(!saved||typeof saved!=='object')return;for(const key of Object.keys(settings)){const value=saved.settings?.[key];if(typeof value===typeof settings[key]&&(typeof value!=='number'||Number.isFinite(value)))settings[key]=value;}if(!['auto','cinematic','balanced','performance'].includes(settings.quality))settings.quality='auto';settings.volume=clamp(settings.volume,0,1);settings.sensitivity=clamp(settings.sensitivity,.25,2);settings.deadzone=clamp(settings.deadzone,0,.4);settings.hapticIntensity=clamp(settings.hapticIntensity,0,1);settings.fov=clamp(settings.fov,35,95);settings.exposure=clamp(settings.exposure,.4,2);for(const key of Object.keys(keyBindings))if(typeof saved.keyBindings?.[key]==='string'&&saved.keyBindings[key].length<32)keyBindings[key]=saved.keyBindings[key];if(['zen','standard','simulation'].includes(saved.mode))sim.settings.mode=saved.mode;if(saved.progress){progress.visited=Array.isArray(saved.progress.visited)?saved.progress.visited.filter(x=>typeof x==='string').slice(0,100):[];progress.journeys=Array.isArray(saved.progress.journeys)?saved.progress.journeys.filter(x=>typeof x==='string').slice(0,6):[];progress.photos=Math.max(0,Math.trunc(saved.progress.photos)||0);progress.tutorialStep=clamp(Math.trunc(saved.progress.tutorialStep)||0,0,9);}}
 try{importPreferences(JSON.parse(localStorage.getItem('skyjourney-preferences-v1')));}catch{}
 const flightHaptics=createFlightHaptics({vibrate:typeof navigator.vibrate==='function'?pattern=>pattern!==0&&navigator.userActivation?.hasBeenActive===false?false:navigator.vibrate(pattern):undefined,isVisible:()=>document.visibilityState==='visible'});
@@ -30,15 +37,58 @@ const motion=createMotion(message=>ui?.toast(message));
 let bridgeTimer=null,bridgePairingShown=false;
 function download(content,name,type){const url=URL.createObjectURL(new Blob([content],{type}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),5000);}
 function snapshot(){return {version:1,simulation:sim.serialize(),settings:{...settings},keyBindings:{...keyBindings},progress:{...progress},camera:cameraName,weather:world?.weather||'Golden Sunset',time:world?.env.time??18.7,routeName};}
-function restore(saved){if(!saved||saved.version!==1)throw new Error('Unrecognized flight file');if(!Number.isFinite(saved.time)||saved.time<0||saved.time>24||!saved.simulation||!cameras.includes(saved.camera)||!data.routes[saved.routeName])throw new Error('Incomplete or invalid flight file');if(!sim.restore(saved.simulation))throw new Error('Invalid flight state');importPreferences({...saved,mode:sim.settings.mode});settings.fov=clamp(Number(settings.fov)||64,35,95);settings.exposure=clamp(Number(settings.exposure)||1,.4,2);settings.volume=clamp(Number.isFinite(Number(settings.volume))?Number(settings.volume):.35,0,1);settings.sensitivity=clamp(Number(settings.sensitivity)||1,.2,2);settings.deadzone=clamp(Number(settings.deadzone)||.08,0,.4);routeName=data.routes[saved.routeName]?saved.routeName:'Golden Islands';world.setWeather(saved.weather);world.setTime(saved.time);setCamera(cameras.includes(saved.camera)?saved.camera:'External');applySettings();}
+function restore(saved){if(!saved||saved.version!==1)throw new Error('Unrecognized flight file');if(!Number.isFinite(saved.time)||saved.time<0||saved.time>24||!saved.simulation||!cameras.includes(saved.camera)||!data.routes[saved.routeName])throw new Error('Incomplete or invalid flight file');if(!sim.restore(saved.simulation))throw new Error('Invalid flight state');clearAcademy();importPreferences({...saved,mode:sim.settings.mode});settings.fov=clamp(Number(settings.fov)||64,35,95);settings.exposure=clamp(Number(settings.exposure)||1,.4,2);settings.volume=clamp(Number.isFinite(Number(settings.volume))?Number(settings.volume):.35,0,1);settings.sensitivity=clamp(Number(settings.sensitivity)||1,.2,2);settings.deadzone=clamp(Number(settings.deadzone)||.08,0,.4);routeName=data.routes[saved.routeName]?saved.routeName:'Golden Islands';world.setWeather(saved.weather);world.setTime(saved.time);setCamera(cameras.includes(saved.camera)?saved.camera:'External');applySettings();}
 function applySettings(){configureHaptics();audio.setVolume(settings.volume);audio.setMuted(settings.muted);audio.setAmbient(settings.ambient);renderer.toneMappingExposure=settings.exposure;setQuality(settings.quality);camera.fov=settings.fov;camera.updateProjectionMatrix();document.documentElement.classList.toggle('reduced-motion',settings.reducedMotion);}
 function setPaused(value){paused=!!value;if(paused)flightHaptics.stop();if(!paused)photoMode=false;accumulator=0;keys.clear();touch={pitch:0,roll:0,yaw:0};ui.setPaused(paused);if(paused)audio.suspend();else audio.resume();}
 function setCamera(name){if(name==='next'||name==='prev'){const i=cameras.indexOf(cameraName);name=cameras[(i+(name==='next'?1:-1)+cameras.length)%cameras.length];}if(!cameras.includes(name))return;cameraName=name;cameraMode=name;freeAnchor=freeLook=null;freePan.set(0,0,0);orbitYaw=orbitPitch=lookX=lookY=0;zoom=1;ui.setCamera(name);const inside=name==='Pilot'||name==='Copilot';aircraft.cabin.visible=inside;aircraft.exterior.visible=!inside;camera.near=inside?.04:.3;camera.fov=inside?80:(name==='External'?50:settings.fov);camera.updateProjectionMatrix();document.querySelector('#scene').classList.remove('view-change');void document.querySelector('#scene').offsetWidth;document.querySelector('#scene').classList.add('view-change');frame=0;}
 function setQuality(name){settings.quality=name;const actual=name==='auto'?'balanced':name;const ratio=actual==='performance'?.72:actual==='cinematic'?Math.min(devicePixelRatio,1.6):Math.min(devicePixelRatio,1.15);renderer.setPixelRatio(ratio);renderer.shadowMap.enabled=actual!=='performance';world.setQuality(actual);}
 function gear(){sim.state.gearTarget=sim.state.gearTarget>.5?0:1;ui.toast(sim.state.gearTarget?'Landing gear extending':'Landing gear retracting');}
 function toggleAP(value){const on=typeof value==='boolean'?value:!sim.autopilot.enabled;if(on&&!sim.autopilot.enabled){sim.autopilot.heading=sim.state.heading*180/Math.PI;sim.autopilot.altitude=sim.state.altitude;sim.autopilot.speed=clamp(sim.state.ias,100,340);}sim.autopilot.enabled=on;ui.toast(on?'Autopilot engaged · enjoy the sky':'Your aircraft, your hands · manual flight');}
+function clearAcademy(){academy.challenge=academy.result=academy.returnFlight=null;}
+function startAcademy(id){
+ const challenge=LANDING_CHALLENGES.find(item=>item.id===id);
+ if(!challenge)return;
+ academy.returnFlight??={simulation:sim.serialize(),camera:cameraName,weather:world.weather,time:world.env.time,routeName};
+ academy.challenge=challenge;academy.result=null;
+ flightHaptics.stop();touchBrake=false;remote=null;
+ sim.settings.mode=id==='first-landing'?'zen':'standard';
+ world.setWeather(challenge.weather,{immediate:true,time:challenge.time});
+ sim.settings.surfaceTemperature=world.env.temp;
+ sim.reset('approach',challenge.approach);
+ setPaused(false);previousStatus='';setCamera('Pilot');ui.togglePanel(null,false);
+ renderer.domElement.focus({preventScroll:true});
+}
+function leaveAcademy(resume){
+ const previous=academy.returnFlight;
+ if(!previous)return;
+ clearAcademy();flightHaptics.stop();touchBrake=false;remote=null;
+ if(resume){sim.restore(previous.simulation);routeName=previous.routeName;}
+ else sim.settings.mode=previous.simulation.settings.mode;
+ world.setWeather(previous.weather,{immediate:true,time:previous.time});
+ setCamera(previous.camera);
+ if(resume){setPaused(false);previousStatus='';renderer.domElement.focus({preventScroll:true});}
+}
+function academyView(){
+ return {challengeId:academy.challenge?.id??null,result:academy.result,bests:academy.bests,
+  guidance:academy.challenge&&!academy.result?getApproachGuidance(sim.state,sim.airport,academy.challenge):null};
+}
+function updateAcademy(){
+ const {challenge}=academy;
+ if(!challenge||academy.result)return;
+ if(sim.touchdown){
+  const result=scoreLanding(sim.touchdown,sim.airport,challenge);
+  const personalBest=result.passed&&result.score>(academy.bests[challenge.id]??-1);
+  academy.result={...result,personalBest};
+  if(personalBest){academy.bests[challenge.id]=result.score;try{localStorage.setItem(academyStorage,JSON.stringify(academy.bests));}catch{}}
+ }else if(sim.state.flightTime>=180||getApproachGuidance(sim.state,sim.airport,challenge).passedRunway){
+  academy.result={score:0,passed:false,medal:null,reason:'missed',rate:null,lateralMeters:null,headingError:null,touchdownMeters:null};
+ }
+}
 async function action(type,value){
  audio.unlock();
+ if(academy.challenge&&['mode','route','routeFollow','weather','time'].includes(type)){
+  ui.toast(settings.language==='es'?'Retomá el vuelo libre para cambiar la ruta, el clima o el modo.':'Resume free flight to change the route, weather or mode.');return;
+ }
  switch(type){
  case 'camera':setCamera(value||'next');break;
  case 'autopilot':toggleAP(value);break;
@@ -70,7 +120,10 @@ async function action(type,value){
  case 'resume':try{const saved=localStorage.getItem('skyjourney-flight-v1');if(!saved){ui.toast('No saved flight yet');break;}restore(JSON.parse(saved));ui.toast('Welcome back to your sky');}catch(e){ui.toast('Cannot load this flight: '+e.message);}break;
  case 'export':download(JSON.stringify(snapshot(),null,2),'SkyJourney-flight.json','application/json');break;
  case 'import':try{restore(value);ui.toast('Flight restored');}catch(e){ui.toast('Cannot import this flight: '+e.message);}break;
- case 'reset':flightHaptics.stop();sim.reset(value||'cruise');if(!value||value==='cruise')sim.setRoute(data.routes[routeName]);setPaused(false);frame=0;previousStatus='';ui.toast(value==='runway'?'Solana runway · power up, then gently raise the nose':value==='approach'?'Solana approach · gear and flaps set':'A fresh golden journey');break;
+ case 'academyStart':startAcademy(value);break;
+ case 'academyRetry':startAcademy(academy.challenge?.id);break;
+ case 'academyExit':leaveAcademy(true);break;
+ case 'reset':leaveAcademy(false);flightHaptics.stop();sim.reset(value||'cruise',value==='approach'?LANDING_CHALLENGES[0].approach:undefined);if(!value||value==='cruise')sim.setRoute(data.routes[routeName]);setPaused(false);frame=0;previousStatus='';ui.toast(value==='runway'?'Solana runway · power up, then gently raise the nose':value==='approach'?'Solana approach · gear and flaps set':'A fresh golden journey');break;
  case 'pause':setPaused(typeof value==='boolean'?value:!paused);break;
  case 'photo':capture();break;
  case 'photoMode':photoMode=!!value;if(photoMode){setPaused(true);setCamera('Free');}else setPaused(false);break;
@@ -118,13 +171,13 @@ function updateCamera(dt){const s=sim.state;origin.set(Math.floor(s.position.x/1
  else {const view={External:[30,11,37],Chase:[0,9,65],Side:[-59,7,7],Front:[-20,9,-57],'Left wing':[-15,2,4],'Right wing':[15,2,4],Top:[0,76,3],Free:[-45,22,65],Orbit:[-38,17,48]}[cameraMode]||[-36,15,48];offset.set(...view);if(cameraMode==='Cinematic')offset.x+=Math.sin(elapsed*.06)*8;offset.applyAxisAngle(new THREE.Vector3(0,1,0),orbitYaw);offset.y+=orbitPitch*45;offset.multiplyScalar(zoom*(camera.aspect<1?1/camera.aspect:1));goal.copy(offset.applyQuaternion(quat)).add(pos);look.set(0,1,-4);aim.copy(look.applyQuaternion(quat)).add(pos);if(cameraMode.includes('wing')){look.set(cameraMode==='Left wing'?-36:36,1,-70);aim.copy(look.applyQuaternion(quat)).add(pos);} }
  if(cameraMode==='Free'){if(!freeAnchor){freeAnchor=goal.clone().add(origin);freeLook=aim.clone().add(origin);}goal.copy(freeAnchor).sub(origin).add(freePan);look.copy(freeLook).sub(freeAnchor).applyAxisAngle(new THREE.Vector3(0,1,0),orbitYaw);look.y+=orbitPitch*80;aim.copy(goal).add(look);}if(settings.cameraShake&&!settings.reducedMotion&&!paused){goal.y+=Math.sin(elapsed*.8)*(inside?.006:.06);}if(frame<2||settings.reducedMotion||inside)camera.position.copy(goal);else camera.position.lerp(goal,1-Math.exp(-dt*5));camera.lookAt(aim);frame++;
 }
-function meta(){return {...settings,time:world.env.time,weather:world.weather,camera:cameraName,route:routeName,islands:data.islands,waypoints:sim.route.waypoints,waypointIndex:sim.route.index,fps:Math.round(fps),quality:settings.quality,paused,photoMode,mode:sim.settings.mode,keyBindings};}
-function animate(now){requestAnimationFrame(animate);const frameDelta=Math.max((now-animate.last)/1000,.001),dt=Math.min(frameDelta,.1);animate.last=now;if(document.hidden)return;fps+=(1/frameDelta-fps)*.025;if(!paused){elapsed+=dt;input(dt);accumulator+=dt;let count=0;while(accumulator>=1/60&&count++<6){sim.settings.surfaceTemperature=world.env.temp;sim.settings.wind=world.env.wind/3;sim.settings.turbulence=world.env.wind/40;sim.update(1/60);accumulator-=1/60;}}
+function meta(){return {...settings,time:world.env.time,weather:world.weather,camera:cameraName,route:routeName,islands:data.islands,waypoints:sim.route.waypoints,waypointIndex:sim.route.index,fps:Math.round(fps),quality:settings.quality,paused,photoMode,mode:sim.settings.mode,keyBindings,academy:academyView()};}
+function animate(now){requestAnimationFrame(animate);const frameDelta=Math.max((now-animate.last)/1000,.001),dt=Math.min(frameDelta,.1);animate.last=now;if(document.hidden)return;fps+=(1/frameDelta-fps)*.025;if(!paused){elapsed+=dt;input(dt);accumulator+=dt;let count=0;while(accumulator>=1/60&&count++<6){sim.settings.surfaceTemperature=world.env.temp;sim.settings.wind=world.env.wind/3;sim.settings.turbulence=world.env.wind/40;sim.update(1/60);accumulator-=1/60;}updateAcademy();}
  if(cameraMode==='Free'){const forward=new THREE.Vector3();camera.getWorldDirection(forward);const right=new THREE.Vector3().crossVectors(forward,new THREE.Vector3(0,1,0)).normalize();const step=dt*90;freePan.addScaledVector(forward,(Number(keys.has('ArrowUp'))-Number(keys.has('ArrowDown')))*step);freePan.addScaledVector(right,(Number(keys.has('ArrowRight'))-Number(keys.has('ArrowLeft')))*step);freePan.y+=(Number(keys.has('PageUp'))-Number(keys.has('PageDown')))*step;}updateCamera(dt);const envMeta=world.update(dt,elapsed,sim.state,camera,origin);aircraft.update(sim.state,{pitch:sim.actuators.elevator,roll:sim.actuators.aileron,yaw:sim.actuators.rudder},sim.autopilot,{islands:data.islands,route:sim.route.waypoints,waypoints:sim.route.waypoints,waypointIndex:sim.route.index,currentWaypoint:sim.route.index,elapsed,dt,day:envMeta.day});audio.update(sim.state,{...envMeta,camera:cameraMode,inside:cameraMode==='Pilot'||cameraMode==='Copilot'});
  const status=sim.state.status;if(status!==previousStatus){if(status==='stall')ui.toast('Low airspeed · lower the nose gently and add power');if(status==='landed')ui.toast('Welcome to Solana · a gentle arrival');previousStatus=status;}
  renderer.render(scene,camera);uiTimer+=dt;if(uiTimer>.1){ui.update(sim.state,sim.autopilot,meta());flightHaptics.update(hapticSample(),now);sendTelemetry();for(const island of data.islands){if(island.name!=='Uncharted island'&&!progress.visited.includes(island.name)&&Math.hypot(sim.state.position.x-island.x,sim.state.position.z-island.z)<island.radius*1.25){progress.visited.push(island.name);ui.toast('A beautiful place discovered · '+island.name);savePreferences();}}if(sim.route.completed>=sim.route.waypoints.length&&sim.route.waypoints.length&&!progress.journeys.includes(routeName)){progress.journeys.push(routeName);ui.toast(routeName+' · journey completed');savePreferences();}uiTimer=0;}if(settings.quality==='auto'&&elapsed>10&&fps<26&&renderer.getPixelRatio()>.8){renderer.setPixelRatio(.8);world.setQuality('performance');}
 }
-function bindInput(){const canvas=renderer.domElement;canvas.tabIndex=0;canvas.style.outline='none';window.addEventListener('keydown',e=>{if(e.defaultPrevented||e.target instanceof HTMLInputElement||e.target instanceof HTMLSelectElement||e.target instanceof HTMLTextAreaElement||e.target instanceof HTMLButtonElement||e.target?.tagName==='SUMMARY')return;if(e.code==='Escape'){e.preventDefault();action('pause');return;}if(e.code==='KeyH'){action('hud');return;}if((cameraMode==='Free'&&/^(ArrowUp|ArrowDown|ArrowLeft|ArrowRight|PageUp|PageDown)$/.test(e.code))||e.code==='Space'||Object.values(keyBindings).includes(e.code)||e.code==='ShiftRight'||e.code==='ControlRight'){e.preventDefault();keys.add(e.code);audio.unlock();}if(e.repeat)return;for(const name of ['autopilot','gear','flaps','camera','cinematic'])if(e.code===keyBindings[name])action(name==='cinematic'?'camera':name,name==='cinematic'?'Cinematic':undefined);});window.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('blur',()=>{flightHaptics.stop();keys.clear();touch={pitch:0,roll:0,yaw:0};});document.addEventListener('visibilitychange',()=>{if(document.hidden){autoPaused=!paused;setPaused(true);}else if(autoPaused){autoPaused=false;setPaused(false);}});
+function bindInput(){const canvas=renderer.domElement;canvas.tabIndex=0;canvas.style.outline='none';window.addEventListener('keydown',e=>{if(e.defaultPrevented)return;if(e.code==='Escape'){e.preventDefault();if(!e.repeat)action('pause');return;}if(e.target instanceof HTMLInputElement||e.target instanceof HTMLSelectElement||e.target instanceof HTMLTextAreaElement||e.target instanceof HTMLButtonElement||e.target?.tagName==='SUMMARY')return;if(e.code==='KeyH'){action('hud');return;}if((cameraMode==='Free'&&/^(ArrowUp|ArrowDown|ArrowLeft|ArrowRight|PageUp|PageDown)$/.test(e.code))||e.code==='Space'||Object.values(keyBindings).includes(e.code)||e.code==='ShiftRight'||e.code==='ControlRight'){e.preventDefault();keys.add(e.code);audio.unlock();}if(e.repeat)return;for(const name of ['autopilot','gear','flaps','camera','cinematic'])if(e.code===keyBindings[name])action(name==='cinematic'?'camera':name,name==='cinematic'?'Cinematic':undefined);});window.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('blur',()=>{flightHaptics.stop();keys.clear();touch={pitch:0,roll:0,yaw:0};});document.addEventListener('visibilitychange',()=>{if(document.hidden){autoPaused=!paused;setPaused(true);}else if(autoPaused){autoPaused=false;setPaused(false);}});
  let lastX=0,lastY=0,downX=0,downY=0;canvas.addEventListener('pointerdown',e=>{canvas.focus({preventScroll:true});audio.unlock();dragging=true;dragMoved=false;lastX=downX=e.clientX;lastY=downY=e.clientY;canvas.setPointerCapture(e.pointerId);});canvas.addEventListener('pointermove',e=>{if(!dragging)return;const dx=e.clientX-lastX,dy=e.clientY-lastY;dragMoved=dragMoved||Math.abs(e.clientX-downX)+Math.abs(e.clientY-downY)>5;lastX=e.clientX;lastY=e.clientY;if(cameraMode==='Pilot'||cameraMode==='Copilot'){lookX=clamp(lookX+dx*.006,-1.3,1.3);lookY=clamp(lookY+dy*.006,-.8,.8);}else{orbitYaw-=dx*.006;orbitPitch=clamp(orbitPitch+dy*.006,-.25,1.3);}});canvas.addEventListener('pointerup',e=>{dragging=false;if(!dragMoved&&(cameraMode==='Pilot'||cameraMode==='Copilot')){const point=new THREE.Vector2(e.clientX/innerWidth*2-1,1-e.clientY/innerHeight*2),ray=new THREE.Raycaster();ray.setFromCamera(point,camera);const hit=ray.intersectObjects(aircraft.interactables,true)[0];if(hit){const a=hit.object.userData.action,delta=e.shiftKey?-1:1;if(a==='ap')toggleAP();else if(a==='speed')action('apSpeed',sim.autopilot.speed+delta*5);else if(a==='heading')action('apHeading',sim.autopilot.heading+delta*5);else if(a==='altitude')action('apAltitude',sim.autopilot.altitude+delta*1000);else if(a==='vs'){action('verticalMode','vs');action('apVS',sim.autopilot.vs+delta*250);}else if(a==='throttle')action('throttle',sim.state.throttle+delta*.05);else action(a);}}});canvas.addEventListener('wheel',e=>{e.preventDefault();if(cameraMode==='Pilot'||cameraMode==='Copilot'||cameraMode==='Free'){camera.fov=clamp(camera.fov+e.deltaY*.02,38,85);camera.updateProjectionMatrix();}else zoom=clamp(zoom*Math.exp(e.deltaY*.0008),.45,3);},{passive:false});canvas.addEventListener('dblclick',()=>{lookX=lookY=orbitYaw=orbitPitch=0;zoom=1;});
  window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();setPaused(true);ui.toast('Graphics paused · recovering your sky');});canvas.addEventListener('webglcontextrestored',()=>{setPaused(false);ui.toast('Your sky is back');});
 }

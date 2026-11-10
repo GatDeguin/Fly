@@ -39,6 +39,7 @@ export function createSimulation({ terrainHeight = () => 0, airport = {}, seed =
   let engine = 0.6;
   let lastAutopilot = true;
   let touchdownTimer = 0;
+  let touchdown = null;
   let landingStatus = null;
   let phase = ((seed >>> 0) % 1000) * 0.013;
 
@@ -80,7 +81,7 @@ export function createSimulation({ terrainHeight = () => 0, airport = {}, seed =
     return clamp((cl - 0.2 - flaps * 0.3) / 5.2, -0.045, 0.19);
   }
 
-  function reset(kind = 'cruise') {
+  function reset(kind = 'cruise', approach = null) {
     const h = field.heading * DEG;
     const heading = kind === 'cruise' ? 178 * DEG : h;
     const air = atmosphere(9753.6);
@@ -112,6 +113,30 @@ export function createSimulation({ terrainHeight = () => 0, airport = {}, seed =
       base.gear = base.gearTarget = 1;
       base.status = 'approach';
       base.wind = { x: 0, z: 0 };
+      if (approach && typeof approach === 'object') {
+        const along = -field.length / 2 - (approach.distanceBeforeThreshold ?? 1050);
+        const lateral = approach.lateralMeters ?? 0;
+        const glide = (approach.glideAngle ?? 3) * DEG;
+        const aim = -field.length / 2 + (approach.aimAfterThreshold ?? 300);
+        const speedTarget = approach.targetSpeed ?? 145;
+        base.heading = wrap(h + (approach.headingOffset ?? 0) * DEG);
+        base.flaps = approach.flaps ?? 3;
+        base.position = {
+          x: field.x + Math.sin(h) * along + Math.cos(h) * lateral,
+          y: field.y + 3.4 + Math.max(0, aim - along) * Math.tan(glide) + (approach.glideOffsetFeet ?? 0) / FT,
+          z: field.z - Math.cos(h) * along + Math.sin(h) * lateral,
+        };
+        const density = atmosphere(base.position.y).density;
+        const tas = speedTarget / (KT * Math.sqrt(density / 1.225));
+        const horizontal = tas * Math.cos(glide);
+        base.velocity = { x: Math.sin(base.heading) * horizontal, y: -tas * Math.sin(glide), z: -Math.cos(base.heading) * horizontal };
+        const qArea = 0.5 * density * tas * tas * WING_AREA;
+        const weight = (BASE_MASS + base.fuel) * G;
+        const liftCoefficient = weight / qArea;
+        const dragCoefficient = 0.021 + 0.044 * liftCoefficient ** 2 + base.flaps * 0.013 + 0.019;
+        const maxThrust = 240000 * (density / 1.225) ** 0.72;
+        base.throttle = clamp((qArea * dragCoefficient - weight * Math.sin(glide)) / maxThrust, 0.05, 0.65);
+      }
     }
     Object.assign(state, base);
     refreshInstruments();
@@ -121,6 +146,7 @@ export function createSimulation({ terrainHeight = () => 0, airport = {}, seed =
     Object.assign(actuators, { elevator: 0, aileron: 0, rudder: 0 });
     Object.assign(route, { waypoints: [], index: 0, completed: 0, distance: 0 });
     pitchRate = rollRate = yawRate = speedIntegral = touchdownTimer = 0;
+    touchdown = null;
     landingStatus = null;
     engine = state.throttle;
     lastAutopilot = autopilot.enabled;
@@ -285,6 +311,11 @@ export function createSimulation({ terrainHeight = () => 0, airport = {}, seed =
       const sink = Math.max(0, -state.velocity.y);
       const safe = state.gear > 0.8 && Math.abs(state.roll) < 14 * DEG && sink < (mode === 'zen' ? 9 : 5);
       state.touchdownRate = sink * FT * 60;
+      touchdown = Object.freeze({
+        x: state.position.x, z: state.position.z, heading: state.heading, roll: state.roll,
+        ias: Math.hypot(state.velocity.x - state.wind.x, state.velocity.y, state.velocity.z - state.wind.z) * KT * Math.sqrt(air.density / 1.225),
+        rate: state.touchdownRate, gear: state.gear, flaps: state.flaps, safe,
+      });
       state.onGround = true;
       state.position.y = nextGround;
       state.velocity.y = 0;
@@ -371,11 +402,12 @@ export function createSimulation({ terrainHeight = () => 0, airport = {}, seed =
       phase = Number.isFinite(dynamics.phase) ? dynamics.phase : phase;
       lastAutopilot = !!autopilot.enabled;
       touchdownTimer = 0;
+      touchdown = null;
       refreshInstruments();
       return true;
     } catch { return false; }
   }
 
   reset();
-  return { state, controls, autopilot, settings, actuators, diagnostics, route, airport: field, reset, update, setRoute, serialize, restore, runwayAt, surfaceAt };
+  return { state, controls, autopilot, settings, actuators, diagnostics, route, airport: field, reset, update, setRoute, serialize, restore, runwayAt, surfaceAt, get touchdown() { return touchdown; } };
 }
