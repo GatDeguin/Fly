@@ -28,6 +28,10 @@ const TRACE_FUNCTIONS = /* glsl */`
   uniform float deckRayActive;
   uniform float deckRayDay;
   uniform float deckRayBrightness;
+  uniform float deckRayDome;
+  uniform float deckSkyLight;
+  uniform float deckStormGlow;
+  uniform vec3 deckSun;
   uniform mat4 deckWorldToLocal;
   uniform sampler2D deckPfdImage;
   uniform sampler2D deckNdImage;
@@ -35,6 +39,9 @@ const TRACE_FUNCTIONS = /* glsl */`
   uniform mat4 deckNdTransform;
   uniform float deckPfdAvailable;
   uniform float deckNdAvailable;
+  uniform sampler2D deckEnginesImage, deckSystemsImage, deckApImage;
+  uniform mat4 deckEnginesTransform, deckSystemsTransform, deckApTransform;
+  uniform float deckEnginesAvailable, deckSystemsAvailable, deckApAvailable;
   const float DECK_FAR = 64.0;
 
   bool deckSlab(float o, float d, float lo, float hi, inout float entry, inout float exitT) {
@@ -89,7 +96,8 @@ const TRACE_FUNCTIONS = /* glsl */`
     float starboard = 1.0 - smoothstep(0.038, 0.24, length((p.xz - vec2(1.0, -13.55)) * vec2(1.0, 1.2)));
     float keys = (1.0 - smoothstep(0.05, 0.14, abs(p.z + 13.12)))
       * smoothstep(0.07, 0.18, abs(fract((p.x + 0.77) * 6.4) - 0.5));
-    radiance = vec3(1.0, 0.62, 0.31) * (port + starboard) * 1.35 + vec3(0.27, 0.46, 0.70) * keys * 0.33;
+    radiance = vec3(1.0, 0.62, 0.31) * (port + starboard) * 1.65 * deckRayDome
+      + vec3(0.27, 0.46, 0.70) * keys * 0.25;
     return t;
   }
 
@@ -106,18 +114,25 @@ const TRACE_FUNCTIONS = /* glsl */`
   }
 
   vec3 deckReflectedRadiance(vec3 o, vec3 d, float roughness) {
-    vec2 pfdUV = vec2(0.0), ndUV = vec2(0.0);
+    vec2 pfdUV = vec2(0.0), ndUV = vec2(0.0), enginesUV = vec2(0.0), systemsUV = vec2(0.0), apUV = vec2(0.0);
     float pfd = DECK_FAR, nd = DECK_FAR;
+    float engines = DECK_FAR, systems = DECK_FAR, ap = DECK_FAR;
     if (deckPfdAvailable > 0.5) pfd = deckScreenHit(o, d, deckPfdTransform, pfdUV);
     if (deckNdAvailable > 0.5) nd = deckScreenHit(o, d, deckNdTransform, ndUV);
+    if (deckEnginesAvailable > 0.5) engines = deckScreenHit(o, d, deckEnginesTransform, enginesUV);
+    if (deckSystemsAvailable > 0.5) systems = deckScreenHit(o, d, deckSystemsTransform, systemsUV);
+    if (deckApAvailable > 0.5) ap = deckScreenHit(o, d, deckApTransform, apUV);
     vec3 ceiling, side;
     float dome = deckCeilingHit(o, d, ceiling);
     float strip = deckSideHit(o, d, side);
-    float hit = min(min(pfd, nd), min(dome, strip));
+    float hit = min(min(pfd, nd), min(min(engines, systems), min(ap, min(dome, strip))));
     if (hit >= DECK_FAR || deckFirstBlock(o, d) + 0.035 < hit) return vec3(0.0);
     vec3 radiance;
     if (hit == pfd) radiance = texture2D(deckPfdImage, pfdUV, 3.5 * roughness).rgb;
     else if (hit == nd) radiance = texture2D(deckNdImage, ndUV, 3.5 * roughness).rgb;
+    else if (hit == engines) radiance = texture2D(deckEnginesImage, enginesUV, 3.5 * roughness).rgb;
+    else if (hit == systems) radiance = texture2D(deckSystemsImage, systemsUV, 3.5 * roughness).rgb;
+    else if (hit == ap) radiance = texture2D(deckApImage, apUV, 3.5 * roughness).rgb;
     else if (hit == dome) radiance = ceiling;
     else radiance = side;
     return radiance * (0.29 + deckRayBrightness * 0.71) * (1.18 - deckRayDay * 0.30)
@@ -130,6 +145,18 @@ const TRACE_FUNCTIONS = /* glsl */`
     vec3 b = normalize(n + vec3( 0.39, 0.55, 0.71));
     return 1.0 - 0.5 * (smoothstep(0.03, 0.68, deckFirstBlock(p, a))
       + smoothstep(0.03, 0.68, deckFirstBlock(p, b)));
+  }
+
+  float deckWindowTransmission(vec3 o, vec3 d) {
+    if (d.z >= -.015) return 0.0;
+    float t = (-13.86 - o.z) / d.z;
+    if (t <= .025 || t > 10. || deckFirstBlock(o,d) < t-.05) return 0.0;
+    vec2 p = (o+d*t).xy;
+    float bottom = smoothstep(.67,.77,p.y);
+    float top = 1.-smoothstep(2.07,2.20,p.y);
+    float sides = smoothstep(-2.30,-2.16,p.x)*(1.-smoothstep(2.44,2.62,p.x));
+    float center = smoothstep(.037,.143,abs(p.x-mix(.77,1.15,clamp((p.y-.69)/1.51,0.,1.))));
+    return bottom*top*sides*center;
   }
 `;
 
@@ -216,10 +243,12 @@ function traceFragment(profile) {
         ${contact ? `outgoingLight *= 1.0 - ${contact.toFixed(2)} * deckContactShadow(deckP, deckN);` : ''}
         outgoingLight += deckReflectedRadiance(deckP, deckR, deckRough) * deckF
           * (1.0 - 0.64 * deckRough) * ${reflection.toFixed(2)};
+        ${contact ? `float beam = deckWindowTransmission(deckP, deckSun)*max(0.,dot(deckN,deckSun));
+        outgoingLight += diffuseColor.rgb*vec3(1.0,.64,.38)*beam*deckSkyLight*deckRayDay*.55;` : ''}
       ${wet ? `}
       if (deckRainWetness > 0.10) {
         vec2 film = deckWindshieldFilm(deckEye + deckFromEye);
-        outgoingLight += vec3(0.19, 0.31, 0.39) * film.y * (0.44 + 0.56 * deckRayDay);
+        outgoingLight += vec3(0.19, 0.31, 0.39) * film.y * (0.44 + 0.56 * deckRayDay + deckStormGlow);
         diffuseColor.a = min(diffuseColor.a + 0.047 * film.x, 0.18);
       }` : ''}
     }
@@ -231,13 +260,19 @@ const unit = (value, fallback) => Number.isFinite(value) ? THREE.MathUtils.clamp
 
 export function createCockpitRayEffects(cabin, materials, screens = {}) {
   const candidateTransform = new THREE.Matrix4();
+  const sources = [['pfd','Pfd'],['nd','Nd'],['engines','Engines'],['systems','Systems'],['ap','Ap']];
   const state = {
     deckRayActive: { value: 0 }, deckRayDay: { value: .8 }, deckRayBrightness: { value: .85 },
+    deckRayDome: { value: 0 }, deckSkyLight: { value: 1 }, deckStormGlow: { value: 0 },
+    deckSun: { value: new THREE.Vector3(0,.3,-.95).normalize() },
     deckRainWetness: { value: 0 }, deckRainClock: { value: 0 }, deckWipersOn: { value: 0 }, deckWiperPhase: { value: 0 },
     deckWorldToLocal: { value: new THREE.Matrix4() },
-    deckPfdImage: { value: null }, deckPfdTransform: { value: new THREE.Matrix4() }, deckPfdAvailable: { value: 0 },
-    deckNdImage: { value: null }, deckNdTransform: { value: new THREE.Matrix4() }, deckNdAvailable: { value: 0 },
   };
+  for (const [,name] of sources) {
+    state[`deck${name}Image`] = {value:null};
+    state[`deck${name}Transform`] = {value:new THREE.Matrix4()};
+    state[`deck${name}Available`] = {value:0};
+  }
   const installed = new Set();
   let hasWindshield = false;
   for (const [key, profile] of Object.entries(TRACE_PROFILES)) {
@@ -250,7 +285,7 @@ export function createCockpitRayEffects(cabin, materials, screens = {}) {
     material.customProgramCacheKey = function () {
       const before = previousCacheKey === THREE.Material.prototype.customProgramCacheKey
         ? previousHook.toString() : previousCacheKey.call(this);
-      return `${before}|deck-rays-v2:${key}`;
+      return `${before}|deck-rays-v3:${key}`;
     };
     material.onBeforeCompile = function (shader, renderer) {
       previousHook.call(this, shader, renderer);
@@ -287,13 +322,16 @@ export function createCockpitRayEffects(cabin, materials, screens = {}) {
     if (!state.deckRayActive.value && !state.deckRainWetness.value) return;
     state.deckRayDay.value = unit(world.day, .8);
     state.deckRayBrightness.value = unit(world.brightness, .85);
+    state.deckRayDome.value = Number(Boolean(world.domeLight));
+    state.deckSkyLight.value = unit(world.skyLight, 1);
+    state.deckStormGlow.value = unit(world.flash, 0);
+    if (world.sunDirection?.isVector3) state.deckSun.value.copy(world.sunDirection);
     cabin.updateWorldMatrix(true, false);
     const determinant = cabin.matrixWorld.determinant();
     if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-8) { state.deckRayActive.value = state.deckRainWetness.value = 0; return; }
     state.deckWorldToLocal.value.copy(cabin.matrixWorld).invert();
-    if (state.deckRayActive.value) {
-      updateScreen(screens.pfd, state.deckPfdImage, state.deckPfdTransform, state.deckPfdAvailable);
-      updateScreen(screens.nd, state.deckNdImage, state.deckNdTransform, state.deckNdAvailable);
+    if (state.deckRayActive.value) for (const [key,name] of sources) {
+      updateScreen(screens[key], state[`deck${name}Image`], state[`deck${name}Transform`], state[`deck${name}Available`]);
     }
   }
 

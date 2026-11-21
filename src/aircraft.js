@@ -426,17 +426,22 @@ export function createAircraft() {
     const lens=noShadow(cylinder(overhead,finish.domeLens||finish.backlight,x,-.137,-.48,.050,.012));
     lens.name='Overhead dome lens';
   }
-  const overheadLamps=[];
+  const overheadLamps=[],overheadSwitches=[];
   const overheadLegend=canvasTexture(640,120,(ctx,w,h)=>{
     ctx.fillStyle='#17202c';ctx.fillRect(0,0,w,h);ctx.strokeStyle='#647288';ctx.lineWidth=2;ctx.strokeRect(2,2,w-4,h-4);
     ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='700 31px sans-serif';ctx.fillStyle='#d2dce4';
     ['DOME','CHECK','WIPER'].forEach((text,i)=>ctx.fillText(text,(i+.5)*w/3,h*.47));
   }).texture;
-  texturePlane(overhead,overheadLegend,0,-.106,-.405,1.20,.136).rotation.x=Math.PI/2;
+  texturePlane(overhead,overheadLegend,0,-.107,-.431,1.20,.100).rotation.x=Math.PI/2;
   for(let i=0;i<3;i++){
     const x=(i-1)*.400;
-    noShadow(roundedBox(overhead,finish.recess||finish.coaming,x,-.113,-.324,.073,.016,.028));
-    overheadLamps.push(keep(noShadow(roundedBox(overhead,i===2?finish.backlight:coolLight,x,-.124,-.324,.047,.007,.014))));
+    noShadow(roundedBox(overhead,finish.recess||finish.coaming,x,-.113,-.324,.171,.022,.106));
+    for(const side of [-1,1])noShadow(roundedBox(overhead,finish.brushed,x+side*.078,-.133,-.309,.014,.038,.077));
+    const pivot=keep(place(overhead,'Overhead switch pivot',x,-.141,-.324));
+    const rocker=noShadow(roundedBox(pivot,finish.knob,0,0,0,.117,.033,.086));
+    const stripe=noShadow(box(pivot,finish.ivory,0,-.019,-.022,.054,.004,.008));
+    overheadSwitches.push({pivot,rocker,stripe});
+    overheadLamps.push(keep(noShadow(roundedBox(overhead,i===2?finish.backlight:coolLight,x,-.124,-.241,.047,.015,.014))));
   }
 
   bowedShell('Bowed instrument fascia',finish.panel,2.61,[[-.82,-13.49],[-.75,-13.34],[-.36,-13.37],[.19,-13.43],[.38,-13.52],[.42,-13.75],[.31,-13.94],[-.68,-13.91],[-.84,-13.72]]);
@@ -632,7 +637,16 @@ export function createAircraft() {
     moldedBeam(lever,finish.brushed,[0,0,0],[0,.278,-.131],.055,.083);
     roundedBox(lever,finish.rubber,0,.273,-.114,.109,.116,.19);
     action(roundedBox(lever,finish.ivory,0,.324,-.159,.144,.080,.185),'throttle','Engine power');
-    action(noShadow(roundedBox(lever,finish.edge,0,.362,-.167,.082,.010,.109)),'throttle','Engine power');
+    action(noShadow(roundedBox(lever,finish.knob,0,.364,-.167,.094,.012,.119)),'throttle','Engine power');
+    const grip=controlLabel(lever,x<0?'1':'2',0,.371,-.187,.054,.042);
+    grip.rotation.x=-Math.PI/2;
+    for(let i=0;i<3;i++){
+      const tread=noShadow(box(lever,finish.leatherSeam,0,.370,-.155+i*.012,.057,.004,.004));
+      action(tread,'throttle','Engine power');
+    }
+    const lock=noShadow(cylinder(lever,finish.brushed,Math.sign(x)*.074,.321,-.166,.021,.009));
+    lock.rotation.z=Math.PI/2;
+    action(lock,'throttle','Engine power');
     moving.throttles.push(lever);
   }
   roundedBox(rail,finish.rubber,.316,.015,-.028,.086,.036,.73);
@@ -795,6 +809,14 @@ export function createAircraft() {
   }).texture;
   noShadow(mesh(register(new THREE.CylinderGeometry(.149,.135,.155,26,1,true,-.86,1.72)),inkMaterial(cupArt),mug,0,.129,0));
 
+  // Register these after the main panel so the primary mouse targets stay first.
+  for(const [index,id,label] of [[0,'cockpitDome','Dome light'],[1,'cockpitChecklist','Flight checklist'],[2,'cockpitWipers','Windshield wipers']]){
+    const control=overheadSwitches[index];
+    control.id=id;
+    action(control.rocker,id,label);
+    action(control.stripe,id,label);
+  }
+
   // Batch shared static pieces without changing raycast targets or articulated controls.
   const primitiveGeometries=new Set(Object.values(shared));
   const batches=new Map(),inverse=new THREE.Matrix4(),local=new THREE.Matrix4();
@@ -873,7 +895,18 @@ export function createAircraft() {
     }
     const dome=world.domeLight===true||num(world.domeLight)>.08;
     const annunciated=[dome,Boolean(world.checklistOpen),armed];
-    for(let i=0;i<3;i++)cabinLamps[i].visible=overheadLamps[i].visible=annunciated[i];
+    for(let i=0;i<3;i++){
+      cabinLamps[i].visible=overheadLamps[i].visible=annunciated[i];
+      const {id,pivot}=overheadSwitches[i];
+      const down=pressedAction===id||(!reduced&&tapTime>0&&tapAction===id);
+      const angle=(annunciated[i]?-.16:.16)+(down?-.12:0);
+      pivot.rotation.x=THREE.MathUtils.lerp(pivot.rotation.x,angle,tactileResponse);
+      pivot.position.y=THREE.MathUtils.lerp(pivot.position.y,hoverAction===id?-.145:-.141,tactileResponse);
+    }
+    const fluidPitch=reduced?0:clamp(num(state.pitch)*-.26+num(controls.pitch)*.075,-.103,.103);
+    const fluidRoll=reduced?0:clamp(num(state.roll)*.29,-.12,.12);
+    drink.rotation.x=THREE.MathUtils.lerp(drink.rotation.x,-Math.PI/2+fluidPitch,response(5));
+    drink.rotation.y=THREE.MathUtils.lerp(drink.rotation.y,fluidRoll,response(5));
   }
   function update(state,controls={},autopilot={},world={}) {
     const now=performance.now();const delta=clamp((now-lastFanTime)/1000,0,.05);lastFanTime=now;

@@ -36,7 +36,11 @@ Usá **RNG** para cambiar el alcance del mapa, **SYS** para pasar entre configur
 
 Los mandos muestran su nombre y valor al pasar el puntero, se hunden o responden al pulsarlos y emiten un clic con el sonido activado. **DOME**, **WIPER** y **CHECK** controlan la luz de techo, los limpiaparabrisas y la lista de aterrizaje. En lluvia, las escobillas despejan parte del vidrio. La lista lee tren, flaps y velocidad del avión; la confirmación de pista y el repaso quedan a cargo del piloto. Estas funciones también están en **Instrumentos de cabina**.
 
-El trazado de rayos local aproxima reflejos de las pantallas y luces, y sombras de contacto dentro de la cabina. Se activa desde **Reflejos con rayos en cabina**. No se aplica al mundo entero: se suspende en la vista exterior, en Rendimiento o cuando el modo Adaptativo reduce la carga. La opción de movimiento reducido limita las animaciones decorativas.
+Los interruptores **DOME**, **CHECK** y **WIPER** del panel superior también se pueden pulsar. Su posición y sus luces indican el mismo estado que los botones del tablero. El café se inclina ligeramente con las maniobras.
+
+**Reflejos con rayos en cabina** activa un trazado local de un rebote para las cinco pantallas, las lámparas y las sombras de contacto. Las monturas del parabrisas recortan la luz que llega al tablero. La opción se suspende en la vista exterior, en Rendimiento o cuando el modo Adaptativo reduce la carga.
+
+El paisaje combina nubes altas con volúmenes bajos, bruma que cambia con la hora y lluvia que se inclina con el viento. En tormenta, un resplandor distante también afecta a la cabina. En la costa, el mar pasa de agua profunda a bajos turquesa y espuma. **Movimiento reducido** congela el desplazamiento decorativo del agua y las nubes y desactiva los resplandores de tormenta.
 
 ## Volar directamente en el móvil
 

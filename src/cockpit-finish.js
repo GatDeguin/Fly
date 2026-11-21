@@ -90,7 +90,8 @@ export function createCockpitMaterials(register = resource => resource) {
       color: '#465361', roughness: .71, metalness: .40, normalMap: grainNormal, roughnessMap: grain,
     }),
     coaming: standard('Cabin • anti-glare dashboard', {
-      color: '#20252d', roughness: .97, metalness: .01, normalMap: leatherNormal, roughnessMap: pores,
+      color: '#232831', roughness: .96, metalness: .01, normalMap: leatherNormal,
+      normalScale: new THREE.Vector2(.52,.52), roughnessMap: pores,
     }),
     rubber: standard('Cabin • soft-touch rubber', {
       color: '#191f28', roughness: .95, metalness: .01, bumpMap: grain, bumpScale: .012, roughnessMap: grain,
@@ -182,7 +183,9 @@ export function createCockpitLighting(cabin, materials) {
     const brightness = clamp(finite(world.brightness, 1), .15, 1.3);
     const dome = clamp(finite(world.domeLight === true ? 1 : world.domeLight, 0), 0, 1);
     const dt = clamp(finite(world.dt, 0), 0, .1);
-    domeLevel = domeLevel === null || dt === 0 ? dome : mix(domeLevel, dome, 1 - Math.exp(-dt * 13));
+    domeLevel = domeLevel === null || dt === 0 || world.reducedMotion ? dome : mix(domeLevel, dome, 1 - Math.exp(-dt * 13));
+    const skyLight = clamp(finite(world.skyLight, 1), .2, 1);
+    const flash = clamp(finite(world.flash, 0), 0, 1);
     const golden = Math.max(0, 1 - Math.min(Math.abs(hour - 6.3), Math.abs(hour - 18.5)) / 2.5)
       * (.23 + daylight * .77) * (1 - rain * .72) * (1 - cloud * .55);
     const direction = world.sunDirection;
@@ -192,16 +195,16 @@ export function createCockpitLighting(cabin, materials) {
     // Bring the key forward and toward the sun-facing pane so it grazes the coaming,
     // instead of casting an orange wash across the instrument faces.
     windowLight.position.set(Math.tanh(x * 4.2) * 2.12, 1.20 + Math.max(0, y) * .31, -13.14 + z * .22);
-    windowLight.color.copy(windowDay).lerp(windowGold, golden);
-    windowLight.intensity = (1.7 + daylight * 10.6 + golden * 8) * (1 - rain * .59) * (1 - cloud * .40);
+    windowLight.color.copy(windowDay).lerp(windowGold, golden).lerp(coolDay, rain * .74 + flash * .16);
+    windowLight.intensity = (1.55 + daylight * 10.6 + golden * 8) * (1 - rain * .59) * (1 - cloud * .40) * skyLight + flash * 10;
     ceilingLight.color.copy(coolDay).lerp(coolNight, night);
-    ceilingLight.intensity = (6.2 + night * 7.6 + rain * 2.0) * (.54 + brightness * .46);
+    ceilingLight.intensity = (4.8 + night * 6.9 + rain * 1.4) * (.54 + brightness * .46);
     // The existing console emitter models indirect spill with the dome off and a pool
     // of warm reading light from overhead with it on, without a fourth shader light.
     consoleLight.position.set(mix(-.73, -.35, domeLevel), mix(.13, 1.83, domeLevel), mix(-11.63, -12.89, domeLevel));
     consoleLight.distance = mix(4.3, 3.75, domeLevel);
     consoleLight.color.copy(consoleDay).lerp(consoleNight, night).lerp(readingLight, domeLevel);
-    consoleLight.intensity = (2.2 + night * 8.8) * (.32 + brightness * .68) + domeLevel * (8.0 + night * 12);
+    consoleLight.intensity = (2.2 + night * 8.8) * (.32 + brightness * .68) + domeLevel * (7.0 + night * 9.5);
     materials.backlight.emissiveIntensity = (.82 + night * 1.16 + golden * .28) * brightness;
     materials.coolBacklight.emissiveIntensity = (.58 + night * .63) * brightness;
     materials.domeLens.emissiveIntensity = .025 + domeLevel * 2.0;

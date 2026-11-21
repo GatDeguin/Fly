@@ -1,9 +1,6 @@
 import * as THREE from 'three';
 import {random,noise} from './world-data.js';
-const glslNoise=`
-float hash(vec3 p){p=fract(p*.3183099+vec3(.1,.2,.3));p*=17.;return fract(p.x*p.y*p.z*(p.x+p.y+p.z));}
-float noise3(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(mix(hash(i),hash(i+vec3(1,0,0)),f.x),mix(hash(i+vec3(0,1,0)),hash(i+vec3(1,1,0)),f.x),f.y),mix(mix(hash(i+vec3(0,0,1)),hash(i+vec3(1,0,1)),f.x),mix(hash(i+vec3(0,1,1)),hash(i+vec3(1,1,1)),f.x),f.y),f.z);}
-float fbm(vec3 p){return .55*noise3(p)+.27*noise3(p*2.07)+.13*noise3(p*4.1)+.05*noise3(p*8.2);}`;
+import {createAtmosphere,createTerrainFinish,stormGlow,weatherNoise} from './world-look.js';
 export const WEATHER={
  'Golden Sunset':{clouds:.65,haze:.22,wind:3,rain:0,time:18.7,temp:18},
  'Clear Skies':{clouds:.16,haze:.13,wind:1,rain:0,time:15,temp:23},
@@ -102,13 +99,12 @@ export function createWorld(scene,data){
  const ambient=new THREE.HemisphereLight(0xa3bbeb,0x393440,2.1);scene.add(ambient);
  const sun=new THREE.DirectionalLight(0xffcf92,3.5);scene.add(sun,sun.target);sun.castShadow=true;sun.shadow.mapSize.set(1024,1024);sun.shadow.camera.left=-45;sun.shadow.camera.right=45;sun.shadow.camera.top=30;sun.shadow.camera.bottom=-30;sun.shadow.camera.near=1;sun.shadow.camera.far=220;sun.shadow.bias=-.0003;sun.shadow.normalBias=.025;
  scene.fog=new THREE.FogExp2(0xb3a0b8,.000008);
- const skyMat=new THREE.ShaderMaterial({side:THREE.BackSide,depthWrite:false,uniforms:{sun:{value:sunDir},day:{value:1},haze:{value:.22},time:{value:0}},vertexShader:`varying vec3 vDir;void main(){vDir=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,fragmentShader:`varying vec3 vDir;uniform vec3 sun;uniform float day,haze,time;${glslNoise}
-void main(){vec3 d=normalize(vDir);float h=d.y;float sunset=1.-smoothstep(.08,.4,sun.y);vec3 zenith=mix(vec3(.24,.38,.6),vec3(.31,.33,.48),sunset);vec3 horizon=mix(vec3(.69,.81,.91),vec3(.94,.55,.37),sunset);vec3 col=mix(horizon,zenith,pow(clamp(h,0.,1.),.48));col=mix(vec3(.44,.43,.57),col,smoothstep(-.25,.02,h));float glow=pow(max(0.,dot(d,sun)),14.);col+=vec3(1.,.43,.11)*glow*.37*sunset;float sd=length(d-sun);col+=vec3(1.,.83,.49)*(.65*exp(-sd*sd*450.)+(1.-smoothstep(.004,.008,sd))*3.);vec3 q=d/(abs(h)+.24)*4.;q.x+=time*.003;float c=fbm(q*vec3(1.,3.,1.));float wisps=smoothstep(.57,.75,c)*smoothstep(.015,.13,h);col=mix(col,vec3(.95,.64,.53),wisps*.4*sunset);col=mix(vec3(.035,.045,.105),col,day);float stars=pow(hash(floor(d*900.)),180.)*(1.-day);col+=vec3(stars)*2.;float moon=1.-smoothstep(.006,.01,length(d-normalize(vec3(-.3,.5,.7))));col+=vec3(.52,.61,.8)*moon*(1.-day);gl_FragColor=vec4(pow(max(col,vec3(0.)),vec3(2.2)),1.);\n#include <tonemapping_fragment>\n#include <colorspace_fragment>}`});
- const sky=new THREE.Mesh(new THREE.SphereGeometry(210000,40,24),skyMat);sky.frustumCulled=false;scene.add(sky);
- const oceanMat=new THREE.ShaderMaterial({uniforms:{time:{value:0},sun:{value:sunDir},day:{value:1},haze:{value:.22},origin:{value:new THREE.Vector3()},wind:{value:3}},vertexShader:`varying vec3 vWorld;uniform float time;uniform vec3 origin;void main(){vec3 p=position;p.z+=sin(p.x*.001+time*.4)*.8;vec4 w=modelMatrix*vec4(p,1.);vWorld=w.xyz;gl_Position=projectionMatrix*viewMatrix*w;}`,fragmentShader:`varying vec3 vWorld;uniform float time,day,haze,wind;uniform vec3 sun,origin;${glslNoise}
-void main(){vec3 p=vWorld+origin;vec2 q=p.xz;float n=fbm(vec3(q*.003,time*.07));float nx=fbm(vec3(q*.007+vec2(1.2,0.),time*.08))-fbm(vec3(q*.007-vec2(1.2,0.),time*.08));float nz=fbm(vec3(q*.007+vec2(0.,1.2),time*.08))-fbm(vec3(q*.007-vec2(0.,1.2),time*.08));vec3 normal=normalize(vec3(nx*(.1+wind*.005),1.,nz*(.1+wind*.005)));vec3 v=normalize(cameraPosition-vWorld);vec3 halfv=normalize(sun+v);float spec=pow(max(dot(normal,halfv),0.),110.)*3.;float broad=pow(max(dot(normal,halfv),0.),14.)*.25;float fr=pow(1.-max(v.y,0.),3.);vec3 water=mix(vec3(.08,.18,.27),vec3(.37,.38,.5),fr);water+=vec3(1.,.55,.2)*(spec+broad)*(day*.9+.1);water+=vec3(n*.025);water=mix(vec3(.012,.025,.055),water,day);float fog=1.-exp(-length(cameraPosition-vWorld)*(.000008+haze*.000009));water=mix(water,mix(vec3(.055,.06,.13),vec3(.68,.49,.49),day),fog);gl_FragColor=vec4(pow(max(water,vec3(0.)),vec3(2.2)),1.);\n#include <tonemapping_fragment>\n#include <colorspace_fragment>}`});
- const ocean=new THREE.Mesh(new THREE.PlaneGeometry(420000,420000,64,64),oceanMat);ocean.rotation.x=-Math.PI/2;ocean.position.y=-1;scene.add(ocean);
- const terrainMaterial=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.94,metalness:.03});
+ const atmosphere=createAtmosphere(sunDir);
+ const sky=new THREE.Mesh(new THREE.SphereGeometry(210000,40,24),atmosphere.sky);
+ sky.name='Atmosphere • sun, haze and high clouds';sky.frustumCulled=false;scene.add(sky);
+ const ocean=new THREE.Mesh(new THREE.PlaneGeometry(420000,420000),atmosphere.ocean);
+ ocean.name='Ocean • waves and coastal shallows';ocean.rotation.x=-Math.PI/2;ocean.position.y=-1;scene.add(ocean);
+ const terrainFinish=createTerrainFinish(),terrainMaterial=terrainFinish.material;
  const terrainMeshes=new Map();
  function terrain(i,detail=72){const rings=26,verts=[],colors=[],indices=[];const dark=new THREE.Color(0x374450),green=new THREE.Color(0x53625b),sand=new THREE.Color(0xbfa28b);for(let r=0;r<=rings;r++)for(let a=0;a<=detail;a++){const ang=a/detail*Math.PI*2,rr=r/rings*data.coast(i,ang),x=i.x+Math.cos(ang)*i.rx*rr,z=i.z+Math.sin(ang)*i.rz*rr,y=data.surfaceHeight(x,z);verts.push(x,y,z);let c=dark.clone().lerp(green,noise(x*.0006,z*.0006,i.seed)*.5);if(y<45)c.lerp(sand,1-Math.min(y/45,1));if(y>1500)c.lerp(new THREE.Color(0x677080),Math.min((y-1500)/3000,.5));colors.push(c.r,c.g,c.b);}for(let r=0;r<rings;r++)for(let a=0;a<detail;a++){const q=r*(detail+1)+a;indices.push(q,q+1,q+detail+1,q+1,q+detail+2,q+detail+1);}const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));geo.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));geo.setIndex(indices);geo.computeVertexNormals();const mesh=new THREE.Mesh(geo,terrainMaterial);mesh.receiveShadow=true;return mesh;}
  function populate(i){const rng=random(i.seed+60),count=110,geo=new THREE.BoxGeometry(1,1,1);const m=new THREE.InstancedMesh(geo,new THREE.MeshStandardMaterial({color:0x878681,roughness:.9}),count);const dummy=new THREE.Object3D();const lights=[];for(let n=0;n<count;n++){const a=rng()*Math.PI*2,r=.72+rng()*.14,x=i.x+Math.cos(a)*i.rx*r,z=i.z+Math.sin(a)*i.rz*r,y=data.terrainHeight(x,z);const size=10+rng()*24;dummy.position.set(x,y+size*.5,z);dummy.scale.set(size,size*(.4+rng()),size);dummy.updateMatrix();m.setMatrixAt(n,dummy.matrix);lights.push(x,y+size+3,z);}const lightGeo=new THREE.BufferGeometry();lightGeo.setAttribute('position',new THREE.Float32BufferAttribute(lights,3));const points=new THREE.Points(lightGeo,new THREE.PointsMaterial({color:0xffc67b,size:24,sizeAttenuation:true,transparent:true,opacity:.6,depthWrite:false}));const g=new THREE.Group();g.add(m,points);g.userData.lights=points;return g;}
@@ -121,30 +117,195 @@ void main(){vec3 p=vWorld+origin;vec2 q=p.xz;float n=fbm(vec3(q*.003,time*.07));
  const runwaySin=Math.sin(runwayGroup.rotation.y),runwayCos=Math.cos(runwayGroup.rotation.y);
  // Bounded ray-marched cloud volumes occupy real world coordinates.
  const cloudVertex=`varying vec3 vWorld;varying vec3 vCenter;void main(){vec4 w=modelMatrix*vec4(position,1.);vWorld=w.xyz;vCenter=(modelMatrix*vec4(0.,0.,0.,1.)).xyz;gl_Position=projectionMatrix*viewMatrix*w;}`;
- const cloudFragment=`varying vec3 vWorld,vCenter;uniform vec3 size,sun;uniform float time,day,opacity,steps;${glslNoise}
-float density(vec3 p){float d=10.;for(int i=0;i<5;i++){float f=float(i);vec3 c=vec3(sin(f*2.4)*.43,cos(f*3.6)*.25,cos(f*1.7)*.4);float r=.43+.12*sin(f*1.3);d=min(d,length((p-c)*vec3(1.,1.1,1.))-r);}float n=noise3(p*9.+vec3(time*.006,0.,0.));float edge=1.-smoothstep(.82,.99,max(max(abs(p.x),abs(p.y)),abs(p.z)));return (1.-smoothstep(-.13,.10,d+(n-.5)*.18))*edge;}
-void main(){vec3 ro=(cameraPosition-vCenter)/size,rd=normalize(vWorld-cameraPosition);vec3 dr=rd/size;vec3 inv=1./dr;vec3 lo=(-vec3(1.)-ro)*inv,hi=(vec3(1.)-ro)*inv;vec3 mn=min(lo,hi),mx=max(lo,hi);float a=max(max(mn.x,mn.y),mn.z),b=min(min(mx.x,mx.y),mx.z);if(b<max(a,0.))discard;a=max(a,0.);float step=(b-a)/steps;float alpha=0.;vec3 col=vec3(0.);for(int j=0;j<24;j++){if(float(j)>=steps)break;vec3 p=ro+dr*(a+(float(j)+.5)*step);float den=density(p)*1.7;float op=1.-exp(-den*step/size.y*2.);float shade=clamp(.8+p.y*.4-density(p+sun*.16)*.5,.2,1.);vec3 c=mix(vec3(.38,.4,.56),vec3(1.,.76,.62),shade);c=mix(vec3(.12,.14,.24),c,day);col+=(1.-alpha)*op*c;alpha+=(1.-alpha)*op;if(alpha>.97)break;}float dist=length(cameraPosition-vCenter);float haze=1.-exp(-dist*.000009);col=mix(col,mix(vec3(.08,.1,.2),vec3(.76,.58,.58),day)*alpha,haze);gl_FragColor=vec4(col/max(alpha,.001),alpha*opacity);\n#include <tonemapping_fragment>\n#include <colorspace_fragment>}`;
+ const cloudFragment=`varying vec3 vWorld,vCenter;
+uniform vec3 size,sun;
+uniform float time,day,opacity,steps,wet,flash,seed;
+${weatherNoise}
+float envelope(vec3 p) {
+ float d=2.;
+ for(int i=0;i<5;i++) {
+  float f=float(i)+seed;
+  vec3 center=vec3(sin(f*2.4)*.53,cos(f*3.6)*.20,cos(f*1.7)*.45);
+  d=min(d,length((p-center)*vec3(1.,1.18,1.))-(.40+.12*sin(f*1.3)));
+ }
+ return d;
+}
+float density(vec3 p) {
+ float edge=1.-smoothstep(.76,1.,max(max(abs(p.x),abs(p.y)),abs(p.z)));
+ float base=smoothstep(-.69,-.34,p.y);
+ vec3 q=p*vec3(5.,5.9,5.)+vec3(seed*3.,time*.008,0.);
+ float erosion=(noise3(q)-.49)*.19+(noise3(q*2.8)-.49)*.075;
+ return (1.-smoothstep(-.04,.17,envelope(p)+erosion))*base*edge;
+}
+void main() {
+ vec3 ro=(cameraPosition-vCenter)/size,rd=normalize(vWorld-cameraPosition);
+ vec3 dr=rd/size;
+ vec3 inv=mix(vec3(-1.),vec3(1.),step(0.,dr))/max(abs(dr),vec3(1e-8));
+ vec3 lo=(-vec3(1.)-ro)*inv,hi=(vec3(1.)-ro)*inv;
+ vec3 mn=min(lo,hi),mx=max(lo,hi);
+ float a=max(max(mn.x,mn.y),mn.z),b=min(min(mx.x,mx.y),mx.z);
+ if(b<max(a,0.))discard;
+ a=max(a,0.);
+ float stepSize=(b-a)/steps,alpha=0.;
+ vec3 color=vec3(0.);
+ float sunset=1.-smoothstep(.06,.50,sun.y);
+ float facing=pow(max(dot(rd,sun),0.),6.);
+ vec3 shade=mix(vec3(.28,.37,.52),vec3(.28,.23,.35),sunset);
+ vec3 bright=mix(vec3(.75,.84,.94),vec3(1.04,.69,.48),sunset*(.56+facing*.41));
+ shade=mix(shade,vec3(.115,.158,.24),wet);bright=mix(bright,vec3(.47,.54,.65),wet);
+ for(int j=0;j<26;j++) {
+  if(float(j)>=steps)break;
+  vec3 p=ro+dr*(a+(float(j)+.5)*stepSize);
+  float den=density(p);
+  if(den<.012)continue;
+  float blockage=density(p+sun*.22);
+  if(steps>17.)blockage=blockage*.72+density(p+sun*.38)*.28;
+  float op=1.-exp(-den*stepSize/size.y*(3.2+wet));
+  float light=clamp(.79+p.y*.32-blockage*.52,0.,1.);
+  vec3 cloud=mix(shade,bright,light)+bright*facing*(1.-blockage)*.15;
+  cloud=mix(vec3(.056,.068,.120),cloud,day)+flash*vec3(.22,.30,.45);
+  color+=(1.-alpha)*op*cloud;
+  alpha+=(1.-alpha)*op;
+  if(alpha>.98)break;
+ }
+ if(alpha<.005)discard;
+ float distanceToEye=length(cameraPosition-vCenter);
+ float fade=1.-exp(-distanceToEye*(.000008+wet*.000011));
+ vec3 hazeColor=mix(vec3(.44,.59,.69),vec3(.74,.50,.40),sunset*.66);
+ hazeColor=mix(hazeColor,vec3(.41,.48,.59),wet);
+ color=mix(color/alpha,mix(vec3(.070,.081,.147),hazeColor,day),fade*.80);
+ gl_FragColor=vec4(pow(max(color,vec3(0.)),vec3(2.2)),alpha*opacity);
+ #include <tonemapping_fragment>
+ #include <colorspace_fragment>
+}`;
  const clouds=[];const cloudGeo=new THREE.BoxGeometry(2,2,2);const rng=random(data.seed+888);
- for(let n=0;n<60;n++){const size=new THREE.Vector3(2600+rng()*2800,1100+rng()*1350,2400+rng()*2800);const mat=new THREE.ShaderMaterial({transparent:true,side:THREE.BackSide,depthWrite:false,uniforms:{size:{value:size},sun:{value:sunDir},time:{value:0},day:{value:1},opacity:{value:.8},steps:{value:12}},vertexShader:cloudVertex,fragmentShader:cloudFragment});const mesh=new THREE.Mesh(cloudGeo,mat);mesh.scale.copy(size);mesh.position.set(-22000+(rng()-.5)*(n<24?48000:130000),6500+rng()*2200,-33000+(rng()-.5)*(n<24?45000:130000));if(n<12)mesh.position.set(-39000+rng()*37000,5900+rng()*2600,-28000+rng()*24000);mesh.userData.base=mesh.position.clone();mesh.userData.size=size;group.add(mesh);clouds.push(mesh);}
+ for(let n=0;n<60;n++){const size=new THREE.Vector3(2600+rng()*2800,1100+rng()*1350,2400+rng()*2800);const mat=new THREE.ShaderMaterial({transparent:true,side:THREE.BackSide,depthWrite:false,uniforms:{size:{value:size},sun:{value:sunDir},time:{value:0},day:{value:1},opacity:{value:.8},steps:{value:12},wet:{value:0},flash:{value:0},seed:{value:rng()*19}},vertexShader:cloudVertex,fragmentShader:cloudFragment});const mesh=new THREE.Mesh(cloudGeo,mat);mesh.scale.copy(size);mesh.position.set(-22000+(rng()-.5)*(n<24?48000:130000),6500+rng()*2200,-33000+(rng()-.5)*(n<24?45000:130000));if(n<12)mesh.position.set(-39000+rng()*37000,5900+rng()*2600,-28000+rng()*24000);mesh.userData.base=mesh.position.clone();mesh.userData.size=size;group.add(mesh);clouds.push(mesh);}
  // Distant small cloud clusters use layered, shaded procedural textures.
  function cloudTexture(){const c=document.createElement('canvas');c.width=256;c.height=128;const ctx=c.getContext('2d');const r=random(614);for(let k=0;k<45;k++){const x=40+r()*178,y=55+r()*35,rad=20+r()*34;const g=ctx.createRadialGradient(x,y-rad*.35,2,x,y,rad);g.addColorStop(0,'rgba(255,224,207,.17)');g.addColorStop(.45,'rgba(233,200,194,.12)');g.addColorStop(.76,'rgba(121,125,155,.05)');g.addColorStop(1,'rgba(121,125,155,0)');ctx.fillStyle=g;ctx.fillRect(x-rad,y-rad,rad*2,rad*2);}const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t;}
- const cloudTex=cloudTexture(),sprites=[];for(let n=0;n<230;n++){const m=new THREE.SpriteMaterial({map:cloudTex,transparent:true,depthWrite:false,color:0xffdacc,opacity:.65});const s=new THREE.Sprite(m);s.position.set(-22000+(rng()-.5)*160000,5500+rng()*2600,-10000+(rng()-.5)*160000);s.scale.set(4500+rng()*6500,2100+rng()*2800,1);s.userData.base=s.position.clone();group.add(s);sprites.push(s);}
- const rainGeo=new THREE.BufferGeometry(),rainPos=new Float32Array(500*3);for(let i=0;i<rainPos.length;i+=3){rainPos[i]=(rng()-.5)*80;rainPos[i+1]=(rng()-.5)*50;rainPos[i+2]=(rng()-.5)*80;}rainGeo.setAttribute('position',new THREE.BufferAttribute(rainPos,3));const rain=new THREE.Points(rainGeo,new THREE.PointsMaterial({color:0xbfcada,size:.09,transparent:true,opacity:.35}));scene.add(rain);rain.visible=false;
+ const cloudTex=cloudTexture(),sprites=[];for(let n=0;n<145;n++){const m=new THREE.SpriteMaterial({map:cloudTex,transparent:true,depthWrite:false,color:0xffdacc,opacity:.65});const s=new THREE.Sprite(m);s.position.set(-22000+(rng()-.5)*160000,5000+rng()*2400,-10000+(rng()-.5)*160000);s.scale.set(4500+rng()*6500,2100+rng()*2800,1);s.userData.base=s.position.clone();group.add(s);sprites.push(s);}
+ const rainGeometry=new THREE.BufferGeometry(),drops=[],ends=[];
+ for(let i=0;i<350;i++){
+  const drop=[rng(),rng(),rng()];
+  drops.push(...drop,...drop);ends.push(0,1);
+ }
+ rainGeometry.setAttribute('position',new THREE.Float32BufferAttribute(drops,3));
+ rainGeometry.setAttribute('streakEnd',new THREE.Float32BufferAttribute(ends,1));
+ const rainMaterial=new THREE.ShaderMaterial({
+  transparent:true,depthWrite:false,
+  uniforms:{clock:{value:0},wet:{value:0},wind:{value:0},day:{value:1}},
+  vertexShader:`attribute float streakEnd;
+  uniform float clock,wind;varying float strength;
+  void main(){
+   vec3 drop=(fract(position+vec3(clock*wind*.007,-clock*.49,clock*wind*.003))-.5)*vec3(43.,25.,43.);
+   drop+=streakEnd*vec3(-wind*.011,.37+position.x*.40,-wind*.005);
+   vec4 eye=modelViewMatrix*vec4(drop,1.);
+   float d=length(eye.xyz);
+   strength=(1.-abs(streakEnd-.42))*(1.-smoothstep(12.,28.,d))*smoothstep(1.8,3.8,d);
+   gl_Position=projectionMatrix*eye;
+  }`,
+  fragmentShader:`uniform float wet,day;varying float strength;
+  void main(){
+   gl_FragColor=vec4(vec3(.58,.69,.84),strength*wet*(.085+.20*day));
+   #include <tonemapping_fragment>
+   #include <colorspace_fragment>
+  }`
+ });
+ const rain=new THREE.LineSegments(rainGeometry,rainMaterial);
+ rain.name='Weather • wind-driven rain';rain.frustumCulled=false;rain.visible=false;scene.add(rain);
  let tileKey='',lastFlightTime=0;
- function update(dt,elapsed,state,camera,origin){const clockDelta=state.flightTime-lastFlightTime;lastFlightTime=state.flightTime;if(clockDelta>0&&clockDelta<2)target.time=(target.time+clockDelta/3600)%24;const blend=Math.min(dt*.25,1);for(const k of Object.keys(env))if(k!=='time')env[k]+=(target[k]-env[k])*blend;env.time=(env.time+(((target.time-env.time+36)%24)-12)*blend+24)%24;const hour=env.time;const elevation=Math.sin((hour-6)/12.95*Math.PI)*.75;sunDir.set(.24,elevation,.97).normalize();const day=THREE.MathUtils.smoothstep(elevation,-.13,.04);sky.position.copy(camera.position);skyMat.uniforms.day.value=day;skyMat.uniforms.haze.value=env.haze;skyMat.uniforms.time.value=elapsed;ocean.position.set(camera.position.x,-1,camera.position.z);oceanMat.uniforms.origin.value.copy(origin);oceanMat.uniforms.time.value=elapsed;oceanMat.uniforms.day.value=day;oceanMat.uniforms.haze.value=env.haze;oceanMat.uniforms.wind.value=env.wind;group.position.copy(origin).multiplyScalar(-1);sun.position.copy(new THREE.Vector3(state.position.x,state.position.y,state.position.z).sub(origin)).addScaledVector(sunDir,95);sun.target.position.set(state.position.x-origin.x,state.position.y,state.position.z-origin.z);sun.intensity=(.35+day*3.2)*(1-env.haze*.35);sun.color.setRGB(1,.68+Math.max(elevation,0)*.25,.43+Math.max(elevation,0)*.45);ambient.intensity=.32+day*1.8;scene.environmentIntensity=.1+day*.8;scene.fog.color.setRGB(.18+day*.48,.19+day*.32,.28+day*.26);scene.fog.density=.000005+env.haze*.000015;
- runwayLights.uniforms.daylight.value=day;runwayLights.uniforms.haze.value=env.haze;
- runwayLights.uniforms.observerZ.value=runwaySin*(camera.position.x+origin.x-data.airport.x)+runwayCos*(camera.position.z+origin.z-data.airport.z);
- for(let n=0;n<clouds.length;n++){const c=clouds[n];c.visible=n<Math.round(env.clouds*(quality==='performance'?8:quality==='cinematic'?36:16));c.material.uniforms.day.value=day;c.material.uniforms.time.value=elapsed;c.material.uniforms.opacity.value=.87+env.haze*.08;c.position.x=c.userData.base.x+elapsed*env.wind*.45-Math.round((c.userData.base.x+elapsed*env.wind*.45-state.position.x)/180000)*180000;c.position.z=c.userData.base.z-Math.round((c.userData.base.z-state.position.z)/180000)*180000;}
- for(let n=0;n<sprites.length;n++){const s=sprites[n];s.visible=n<env.clouds*sprites.length;s.material.opacity=.22;s.material.color.setRGB(.45+day*.55,.49+day*.36,.64+day*.14);s.position.x=s.userData.base.x+elapsed*env.wind*.45-Math.round((s.userData.base.x+elapsed*env.wind*.45-state.position.x)/180000)*180000;s.position.z=s.userData.base.z-Math.round((s.userData.base.z-state.position.z)/180000)*180000;}
- const key=Math.round(state.position.x/80000)+','+Math.round(state.position.z/80000);if(key!==tileKey){tileKey=key;rebuild(state.position.x,state.position.z);}
- for(const g of terrainMeshes.values())g.children[1].userData.lights.material.opacity=.25+(1-day)*.7;
- rain.visible=env.rain>.1;rain.position.copy(camera.position);if(rain.visible){for(let n=1;n<rainPos.length;n+=3){rainPos[n]-=dt*18;if(rainPos[n]<-25)rainPos[n]=25;}rainGeo.attributes.position.needsUpdate=true;}
- let inside=0;for(const c of clouds){if(!c.visible)continue;const p=state.position,sz=c.userData.size,d=Math.hypot((p.x-c.position.x)/sz.x,(p.y-c.position.y)/sz.y,(p.z-c.position.z)/sz.z);inside=Math.max(inside,Math.max(0,1-d));}scene.fog.density+=inside*.001;
- return {day,cloudDensity:inside,wind:env.wind,rain:env.rain,time:env.time,weather};}
+ const solarOrigin=new THREE.Vector3();
+ const moonColor=new THREE.Color('#7888bb'),sunColor=new THREE.Color();
+ const duskAir=new THREE.Color('#b28b8f'),dayAir=new THREE.Color('#9bbdcd');
+ const stormAir=new THREE.Color('#8797ad'),nightAir=new THREE.Color('#26344f');
+ const airColor=new THREE.Color();
+
+ function update(dt,elapsed,state,camera,origin,{reducedMotion=false}={}){
+  const clockDelta=state.flightTime-lastFlightTime;
+  lastFlightTime=state.flightTime;
+  if(clockDelta>0&&clockDelta<2)target.time=(target.time+clockDelta/3600)%24;
+  const blend=Math.min(dt*.25,1);
+  for(const key of Object.keys(env))if(key!=='time')env[key]+=(target[key]-env[key])*blend;
+  env.time=(env.time+(((target.time-env.time+36)%24)-12)*blend+24)%24;
+  const hour=env.time,elevation=Math.sin((hour-6)/12.95*Math.PI)*.75;
+  const azimuth=.24+(18.7-hour)*.121;
+  sunDir.set(Math.sin(azimuth),elevation,Math.cos(azimuth)).normalize();
+  const day=THREE.MathUtils.smoothstep(elevation,-.13,.04);
+  const dusk=1-THREE.MathUtils.smoothstep(elevation,.055,.47);
+  const flash=stormGlow(elapsed,env.rain,reducedMotion);
+  const motionClock=reducedMotion?0:elapsed;
+  const low=quality==='performance';
+  sky.position.copy(camera.position);
+  ocean.position.set(camera.position.x,-1,camera.position.z);
+  group.position.copy(origin).multiplyScalar(-1);
+  const key=Math.round(state.position.x/80000)+','+Math.round(state.position.z/80000);
+  if(key!==tileKey){tileKey=key;rebuild(state.position.x,state.position.z);}
+  atmosphere.setCoasts(data.islands,state.position);
+  atmosphere.update(env,day,motionClock,camera.position,origin,flash,!low);
+  terrainFinish.rain.value=env.rain;
+
+  const keyDirection=day>.02?sunDir:solarOrigin.set(-.38,.49,.77).normalize();
+  sun.target.position.set(state.position.x-origin.x,state.position.y-origin.y,state.position.z-origin.z);
+  sun.position.copy(sun.target.position).addScaledVector(keyDirection,95);
+  sun.intensity=(.16+day*3.5)*(1-env.haze*.28)*(1-env.rain*.84)+flash*.75;
+  sunColor.setRGB(1,.92-dusk*.24-env.rain*.05,.81-dusk*.32+env.rain*.12);
+  sun.color.copy(moonColor).lerp(sunColor,day);
+  ambient.color.setRGB(.47+day*.22,.53+day*.27,.73+day*.19);
+  ambient.intensity=.48+day*(1.35-env.rain*.22)+flash*.75;
+  airColor.copy(dayAir).lerp(duskAir,dusk).lerp(stormAir,env.rain*.85);
+  scene.fog.color.copy(nightAir).lerp(airColor,day);
+  scene.fog.density=.000004+env.haze*.000014;
+  runwayLights.uniforms.daylight.value=day;runwayLights.uniforms.haze.value=env.haze;
+  runwayLights.uniforms.observerZ.value=runwaySin*(camera.position.x+origin.x-data.airport.x)+runwayCos*(camera.position.z+origin.z-data.airport.z);
+
+  const drift=motionClock*env.wind*.72;
+  function positionCloud(cloud){
+   const base=cloud.userData.base;
+   cloud.position.x=base.x+drift-Math.round((base.x+drift-state.position.x)/180000)*180000;
+   cloud.position.z=base.z+drift*.18-Math.round((base.z+drift*.18-state.position.z)/180000)*180000;
+  }
+  let inside=0;
+  const cloudCount=Math.round(env.clouds*(low?8:quality==='cinematic'?34:17));
+  for(let n=0;n<clouds.length;n++){
+   const cloud=clouds[n];
+   cloud.visible=n<cloudCount;
+   if(!cloud.visible)continue;
+   const uniforms=cloud.material.uniforms;
+   uniforms.day.value=day;uniforms.time.value=motionClock;uniforms.opacity.value=.87+env.haze*.08;
+   uniforms.wet.value=env.rain;uniforms.flash.value=flash;
+   positionCloud(cloud);
+   cloud.position.y=cloud.userData.base.y-(env.rain*1700+env.haze*550);
+   const p=state.position,sz=cloud.userData.size;
+   const distance=Math.hypot((p.x-cloud.position.x)/sz.x,(p.y-cloud.position.y)/sz.y,(p.z-cloud.position.z)/sz.z);
+   inside=Math.max(inside,1-distance);
+  }
+  const spriteCount=env.clouds*sprites.length*(low?.46:1);
+  for(let n=0;n<sprites.length;n++){
+   const sprite=sprites[n];
+   sprite.visible=n<spriteCount;
+   if(!sprite.visible)continue;
+   positionCloud(sprite);
+   const distance=Math.hypot(state.position.x-sprite.position.x,state.position.z-sprite.position.z);
+   sprite.material.opacity=(.12+env.clouds*.085)*THREE.MathUtils.smoothstep(distance,14000,32000);
+   if(sprite.material.opacity<.015){sprite.visible=false;continue;}
+   sprite.material.color.setRGB(.31+day*(.67-env.rain*.48)+flash*.12,.38+day*(.48-env.rain*.27)+flash*.14,.51+day*.27+flash*.18);
+   sprite.position.y=sprite.userData.base.y-env.rain*1950;
+  }
+  for(const g of terrainMeshes.values())g.children[1].userData.lights.material.opacity=.10+(1-day)*.82;
+  rain.visible=env.rain>.12&&!reducedMotion;
+  if(rain.visible){
+   rain.position.copy(camera.position);
+   rainMaterial.uniforms.clock.value=motionClock;
+   rainMaterial.uniforms.day.value=day;
+   rainMaterial.uniforms.wet.value=env.rain;
+   rainMaterial.uniforms.wind.value=env.wind;
+  }
+  scene.fog.density+=inside*.00025;
+  return {day,cloudDensity:inside,wind:env.wind,rain:env.rain,time:env.time,weather,flash,skyLight:1-env.clouds*.25-env.rain*.28};
+ }
  function setWeather(name,{immediate=false,time}={}){if(!Object.hasOwn(WEATHER,name))return;weather=name;target={...WEATHER[name]};if(Number.isFinite(time))target.time=((time%24)+24)%24;if(immediate)Object.assign(env,target);}
  function setTime(time){target.time=time;}
- function setQuality(name){quality=name;const low=name==='performance';for(const c of clouds)c.material.uniforms.steps.value=low?8:name==='cinematic'?24:12;for(let n=0;n<clouds.length;n++)clouds[n].material.uniforms.opacity.value=low?.65:.85;sun.castShadow=!low;}
- return {group,env,sun,clouds,update,setWeather,setTime,setQuality,get weather(){return weather;},dispose(){group.traverse(o=>{o.geometry?.dispose();});runwayLights.dispose();runwayPaint.dispose();}};
+ function setQuality(name){quality=name;const low=name==='performance';for(const c of clouds)c.material.uniforms.steps.value=low?8:name==='cinematic'?24:14;for(let n=0;n<clouds.length;n++)clouds[n].material.uniforms.opacity.value=low?.65:.85;sun.castShadow=!low;}
+ return {group,env,sun,clouds,update,setWeather,setTime,setQuality,get weather(){return weather;},dispose(){group.traverse(o=>{o.geometry?.dispose();});runwayLights.dispose();runwayPaint.dispose();terrainMaterial.dispose();sky.geometry.dispose();ocean.geometry.dispose();rainGeometry.dispose();atmosphere.sky.dispose();atmosphere.ocean.dispose();rainMaterial.dispose();cloudTex.dispose();scene.remove(group,sky,ocean,rain,ambient,sun,sun.target);}};
 }
 
 

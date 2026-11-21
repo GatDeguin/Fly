@@ -46,13 +46,14 @@ try{
  await page.waitForFunction(()=>SkyJourney.diagnostics.cockpitRayTracing===false);
  await page.evaluate(()=>SkyJourney.action('quality','balanced'));
 
- async function target(action){
-  const point=await page.evaluate(action=>{
-   const object=SkyJourney.aircraft.interactables.find(o=>o.userData.action===action);
+ async function target(action,overhead=false){
+  const point=await page.evaluate(async({action,overhead})=>{
+   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+   const object=SkyJourney.aircraft.interactables.find(o=>o.userData.action===action&&(o.parent.name==='Overhead switch pivot')===overhead);
    if(!object)return null;
    const p=object.getWorldPosition(object.position.clone()).project(SkyJourney.camera);
    return {x:(p.x+1)*innerWidth/2,y:(1-p.y)*innerHeight/2};
-  },action);
+  },{action,overhead});
   assert.ok(point&&point.x>0&&point.x<1600&&point.y>0&&point.y<900,`${action} in the pilot view: ${JSON.stringify(point)}`);
   return point;
  }
@@ -87,6 +88,11 @@ try{
 
  const dome=await target('cockpitDome');
  await page.mouse.click(dome.x,dome.y);
+ assert.equal(await page.evaluate(()=>SkyJourney.snapshot().settings.cockpitDome),true);
+ const overheadDome=await target('cockpitDome',true);
+ await page.mouse.click(overheadDome.x,overheadDome.y);
+ assert.equal(await page.evaluate(()=>SkyJourney.snapshot().settings.cockpitDome),false,'the overhead switch controls the same cabin light');
+ await page.mouse.click(overheadDome.x,overheadDome.y);
  assert.equal(await page.evaluate(()=>SkyJourney.snapshot().settings.cockpitDome),true);
  const checklist=await target('cockpitChecklist');
  await page.mouse.click(checklist.x,checklist.y);
